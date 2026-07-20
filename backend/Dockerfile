@@ -6,7 +6,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py .
+COPY main.py solar_system.py exoplanets.py .
 
 # Ephemeris cache (de421.bsp, ~17MB) lands here on first pass-prediction
 # request — mount this as a volume in docker-compose so it isn't
