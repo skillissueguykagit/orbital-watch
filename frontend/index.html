@@ -1,0 +1,2340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SSA — Space Situational Awareness</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<style>
+  :root{
+    --bg: #070b14;
+    --panel: #0c1220;
+    --panel-border: #1c2b42;
+    --text: #dce8f2;
+    --muted: #5c7189;
+    --cyan: #5eead4;
+    --cyan-dim: #2a5a54;
+    --amber: #f5a623;
+    --danger: #ff5f5f;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Inter', sans-serif;
+  }
+  *{ box-sizing: border-box; }
+  html, body{ margin:0; height:100%; background:var(--bg); color:var(--text); font-family:var(--sans); overflow:hidden; }
+  #canvas-wrap{ position:absolute; inset:0; }
+
+  .hud{ position:absolute; pointer-events:none; }
+  .hud > *{ pointer-events:auto; }
+
+  /* top bar */
+  #topbar{
+    top:0; left:0; right:0; height:64px;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 24px;
+    background:linear-gradient(180deg, rgba(7,11,20,0.95), rgba(7,11,20,0.0));
+  }
+  #brand{ display:flex; align-items:center; gap:12px; }
+  #brand .dot{ width:9px; height:9px; border-radius:50%; background:var(--cyan); box-shadow:0 0 8px var(--cyan); animation:pulse 2s infinite; }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+  #brand .title{ font-family:var(--mono); font-weight:700; letter-spacing:.14em; font-size:13px; color:var(--text); }
+  #brand .subtitle{ font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.1em; margin-top:2px; }
+
+  #clock{ font-family:var(--mono); font-size:12px; color:var(--cyan); letter-spacing:.06em; text-align:right; }
+  #clock .date{ color:var(--muted); font-size:10px; }
+
+  /* left telemetry panel */
+  #panel-left{
+    top:80px; left:20px; width:230px;
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:6px;
+    padding:16px; backdrop-filter: blur(4px);
+  }
+  .panel-label{ font-family:var(--mono); font-size:10px; letter-spacing:.14em; color:var(--muted); margin-bottom:10px; }
+  .stat-row{ display:flex; justify-content:space-between; align-items:baseline; padding:6px 0; border-bottom:1px solid var(--panel-border); }
+  .stat-row:last-child{ border-bottom:none; }
+  .stat-key{ font-size:11px; color:var(--muted); }
+  .stat-val{ font-family:var(--mono); font-size:13px; color:var(--text); }
+  .stat-val.cyan{ color:var(--cyan); }
+
+  select#group-select{
+    width:100%; margin-top:10px; background:#0a1220; border:1px solid var(--panel-border); color:var(--text);
+    font-family:var(--mono); font-size:11px; padding:8px; border-radius:4px; letter-spacing:.04em;
+  }
+
+  /* right selected-object panel */
+  #panel-right{
+    top:556px; right:20px; width:290px;
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:6px;
+    padding:18px; display:none; backdrop-filter: blur(4px);
+  }
+  #panel-right.visible{ display:block; }
+  #obj-name{ font-family:var(--mono); font-weight:700; font-size:14px; color:var(--cyan); letter-spacing:.03em; margin-bottom:2px; }
+  #obj-norad{ font-family:var(--mono); font-size:10px; color:var(--muted); margin-bottom:14px; }
+  #close-panel{ position:absolute; top:14px; right:14px; cursor:pointer; color:var(--muted); font-family:var(--mono); font-size:14px; background:none; border:none; }
+  #close-panel:hover{ color:var(--text); }
+
+  /* bottom ticker */
+  #ticker-wrap{
+    bottom:0; left:0; right:0; height:34px;
+    background:var(--panel); border-top:1px solid var(--panel-border);
+    display:flex; align-items:center; overflow:hidden;
+  }
+  #ticker{ white-space:nowrap; font-family:var(--mono); font-size:11px; color:var(--muted); padding-left:100%; animation: scroll-left 40s linear infinite; }
+  @keyframes scroll-left{ to{ transform: translateX(-100%); } }
+  #ticker span{ color:var(--cyan); margin:0 6px; }
+
+  #status-badge{
+    position:absolute; left:20px; bottom:44px;
+    font-family:var(--mono); font-size:10px; letter-spacing:.1em; padding:6px 10px; border-radius:3px;
+    background:rgba(94,234,212,0.08); border:1px solid var(--cyan-dim); color:var(--cyan);
+  }
+  #status-badge.error{ background:rgba(255,95,95,0.08); border-color:#7a2f2f; color:var(--danger); }
+
+  #scan-btn{
+    width:100%; margin-top:14px; background:rgba(245,166,35,0.08); border:1px solid #7a5a1f; color:var(--amber);
+    font-family:var(--mono); font-size:10px; letter-spacing:.1em; padding:9px; border-radius:4px; cursor:pointer;
+  }
+  #scan-btn:hover{ background:rgba(245,166,35,0.16); }
+  #scan-btn:disabled{ opacity:.5; cursor:wait; }
+
+  #alert-wrap{
+    top:80px; left:50%; transform:translateX(-50%);
+    width:min(560px, 90vw); max-height:50vh; overflow-y:auto;
+    display:none;
+  }
+  #alert-wrap.visible{ display:block; }
+  .alert-card{
+    background:rgba(255,95,95,0.08); border:1px solid #7a2f2f; border-radius:6px;
+    padding:12px 14px; margin-bottom:8px; backdrop-filter: blur(4px);
+  }
+  .alert-card.clear{ background:rgba(94,234,212,0.06); border-color:var(--cyan-dim); }
+  .alert-head{ display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:11px; letter-spacing:.08em; color:var(--danger); font-weight:700; }
+  .alert-card.clear .alert-head{ color:var(--cyan); }
+  .alert-body{ font-family:var(--mono); font-size:11px; color:var(--text); margin-top:6px; line-height:1.6; }
+  .alert-body b{ color:var(--amber); }
+  .alert-close{ margin-left:auto; cursor:pointer; color:var(--muted); background:none; border:none; font-family:var(--mono); }
+
+  #panel-events{
+    top:80px; right:20px; width:290px; height:460px;
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:6px;
+    padding:16px; backdrop-filter: blur(4px);
+  }
+  .event-section{ margin-bottom:16px; }
+  .event-section:last-child{ margin-bottom:0; }
+  .event-title{ font-family:var(--mono); font-size:10px; letter-spacing:.12em; color:var(--muted); margin-bottom:8px; display:flex; align-items:center; gap:6px; }
+  .event-item{ font-size:11px; padding:7px 0; border-bottom:1px solid var(--panel-border); }
+  .event-item:last-child{ border-bottom:none; }
+  .event-item .name{ font-family:var(--mono); color:var(--text); font-weight:500; }
+  .event-item .meta{ color:var(--muted); font-size:10px; margin-top:2px; }
+  .event-item .meta b{ color:var(--cyan); font-weight:500; }
+  .event-item.hazard .name{ color:var(--danger); }
+  .kp-gauge{ display:flex; align-items:center; gap:10px; }
+  .kp-value{ font-family:var(--mono); font-size:22px; font-weight:700; }
+  .kp-quiet{ color:var(--cyan); }
+  .kp-unsettled{ color:var(--amber); }
+  .kp-storm{ color:var(--danger); }
+  .kp-label{ font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; }
+
+  #panel-events.collapsed .event-section{ display:none; }
+  #events-toggle{ cursor:pointer; color:var(--muted); font-size:11px; }
+
+  #panel-search{
+    top:80px; left:270px; width:260px;
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:6px;
+    padding:16px; backdrop-filter: blur(4px);
+  }
+  #search-input{
+    width:100%; background:#0a1220; border:1px solid var(--panel-border); color:var(--text);
+    font-family:var(--mono); font-size:12px; padding:9px 10px; border-radius:4px; letter-spacing:.02em;
+  }
+  #search-input::placeholder{ color:var(--muted); }
+  .band-row{ display:flex; gap:6px; margin-top:10px; flex-wrap:wrap; }
+  .band-btn{
+    flex:1; min-width:56px; background:#0a1220; border:1px solid var(--panel-border); color:var(--muted);
+    font-family:var(--mono); font-size:9px; letter-spacing:.06em; padding:6px 4px; border-radius:4px; cursor:pointer; text-align:center;
+  }
+  .band-btn.active{ border-color:var(--cyan-dim); color:var(--cyan); background:rgba(94,234,212,0.08); }
+  #search-count{ font-family:var(--mono); font-size:10px; color:var(--muted); margin:10px 0 6px; }
+  #search-results{ }
+  .result-row{
+    display:flex; justify-content:space-between; align-items:center; padding:7px 8px; border-radius:4px;
+    cursor:pointer; font-size:11px;
+  }
+  .result-row:hover{ background:rgba(94,234,212,0.06); }
+  .result-row .r-name{ font-family:var(--mono); color:var(--text); }
+  .result-row .r-alt{ font-family:var(--mono); color:var(--muted); font-size:10px; }
+  .result-row.hazard .r-name{ color:var(--danger); }
+
+  .collapse-toggle{
+    float:right; background:none; border:none; color:var(--muted); cursor:pointer;
+    font-family:var(--mono); font-size:13px; line-height:1; padding:0 2px;
+  }
+  .collapse-toggle:hover{ color:var(--text); }
+  .hud.collapsed .panel-body{ display:none; }
+
+  .loc-row{ margin-top:12px; padding-top:10px; border-top:1px solid var(--panel-border); }
+  #use-location-btn{
+    width:100%; background:rgba(155,126,245,0.08); border:1px solid #4a3a7a; color:#b7a3ff;
+    font-family:var(--mono); font-size:10px; letter-spacing:.08em; padding:8px; border-radius:4px; cursor:pointer;
+  }
+  #use-location-btn:hover{ background:rgba(155,126,245,0.16); }
+  #loc-status{ display:block; margin-top:6px; font-family:var(--mono); font-size:10px; color:var(--muted); }
+  #loc-hint{ font-size:9px; color:var(--muted); margin-top:4px; font-style:italic; }
+
+  #legend{
+    bottom:44px; left:20px;
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:6px;
+    padding:10px 14px; font-family:var(--mono); font-size:10px; color:var(--muted);
+  }
+  .legend-row{ display:flex; align-items:center; gap:8px; padding:3px 0; }
+  .legend-dot{ width:8px; height:8px; border-radius:50%; display:inline-block; flex-shrink:0; }
+  .legend-tri{ width:0; height:0; border-left:4px solid transparent; border-right:4px solid transparent; border-bottom:8px solid; display:inline-block; flex-shrink:0; }
+
+  #hover-tip{
+    position:fixed; display:none; pointer-events:none; z-index:50;
+    background:rgba(12,18,32,0.95); border:1px solid var(--panel-border); border-radius:4px;
+    padding:5px 9px; font-family:var(--mono); font-size:11px; color:var(--cyan);
+    line-height:1.5; white-space:pre-line;
+  }
+
+  #exo-labels-layer, #ss-labels-layer{ position:absolute; inset:0; pointer-events:none; overflow:hidden; z-index:5; }
+  .exo-label, .body-label{
+    position:absolute; transform:translate(-50%, -50%); pointer-events:none;
+    font-family:var(--mono); font-size:10px; color:rgba(220,232,242,0.85);
+    text-shadow:0 0 4px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9);
+    white-space:nowrap;
+  }
+  .exo-label.selected, .body-label.selected{ color:var(--cyan); font-weight:700; }
+
+  #reset-view-btn{
+    background:none; border:1px solid var(--panel-border); color:var(--muted);
+    font-family:var(--mono); font-size:10px; letter-spacing:.06em; padding:6px 10px; border-radius:4px;
+    cursor:pointer; margin-right:14px;
+  }
+  #reset-view-btn:hover{ color:var(--text); border-color:var(--cyan-dim); }
+
+  #weather-toggle-btn{
+    width:100%; margin-top:8px; background:rgba(94,160,234,0.08); border:1px solid #2a4a6e; color:#7fb3f0;
+    font-family:var(--mono); font-size:10px; letter-spacing:.06em; padding:8px; border-radius:4px; cursor:pointer;
+  }
+  #weather-toggle-btn:hover{ background:rgba(94,160,234,0.16); }
+  #weather-toggle-btn.active{ background:rgba(94,160,234,0.2); border-color:#7fb3f0; }
+
+  .window-handle{ cursor:move; user-select:none; touch-action:none; }
+  .hud.window{
+    display:flex; flex-direction:column; overflow:hidden;
+    box-shadow:0 8px 24px rgba(0,0,0,0.4);
+  }
+  .hud.window .panel-body{
+    flex:1 1 auto; overflow-y:auto; min-height:0;
+  }
+  .resize-handle{
+    position:absolute; width:16px; height:16px; right:1px; bottom:1px; cursor:nwse-resize;
+    background:linear-gradient(135deg, transparent 50%, var(--panel-border) 50%);
+    border-radius:0 0 5px 0; touch-action:none;
+  }
+  .resize-handle:hover{ background:linear-gradient(135deg, transparent 50%, var(--cyan-dim) 50%); }
+  #reset-layout-btn{
+    background:none; border:1px solid var(--panel-border); color:var(--muted);
+    font-family:var(--mono); font-size:10px; letter-spacing:.06em; padding:6px 10px; border-radius:4px;
+    cursor:pointer; margin-right:10px;
+  }
+  #reset-layout-btn:hover{ color:var(--text); border-color:var(--cyan-dim); }
+
+  .mode-btn{
+    background:none; border:1px solid var(--panel-border); color:var(--muted);
+    font-family:var(--mono); font-size:11px; letter-spacing:.06em; padding:8px 14px; cursor:pointer;
+  }
+  .mode-btn:first-child{ border-radius:4px 0 0 4px; border-right:none; }
+  .mode-btn:last-child{ border-radius:0 4px 4px 0; }
+  .mode-btn.active{ background:rgba(94,234,212,0.1); color:var(--cyan); border-color:var(--cyan-dim); }
+
+  #panel-ss-controls{
+    top:80px; left:20px; width:260px;
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:6px;
+    padding:16px; backdrop-filter: blur(4px); display:none;
+  }
+  #panel-ss-controls.visible{ display:flex; flex-direction:column; }
+  .ss-body-row{
+    display:flex; justify-content:space-between; align-items:center; padding:6px 8px; border-radius:4px;
+    cursor:pointer; font-size:11px; font-family:var(--mono);
+  }
+  .ss-body-row:hover{ background:rgba(94,234,212,0.06); }
+  .ss-body-row .dot{ width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:8px; flex-shrink:0; }
+  #ss-speed-row{ display:flex; gap:6px; margin-top:10px; flex-wrap:wrap; }
+  .ss-speed-btn{
+    flex:1; min-width:48px; background:#0a1220; border:1px solid var(--panel-border); color:var(--muted);
+    font-family:var(--mono); font-size:9px; padding:6px 4px; border-radius:4px; cursor:pointer; text-align:center;
+  }
+  .ss-speed-btn.active{ border-color:var(--cyan-dim); color:var(--cyan); background:rgba(94,234,212,0.08); }
+  #ss-date-display{ font-family:var(--mono); font-size:11px; color:var(--cyan); margin-top:10px; text-align:center; padding:8px; background:#0a1220; border-radius:4px; }
+  #ss-jump-now-btn{
+    width:100%; margin-top:8px; background:none; border:1px solid var(--panel-border); color:var(--muted);
+    font-family:var(--mono); font-size:10px; padding:7px; border-radius:4px; cursor:pointer;
+  }
+  #ss-jump-now-btn:hover{ color:var(--text); }
+
+  #panel-ss-info{
+    top:80px; right:20px; width:270px;
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:6px;
+    padding:18px; display:none; backdrop-filter: blur(4px);
+  }
+  #panel-ss-info.visible{ display:block; }
+  #ss-info-name{ font-family:var(--mono); font-weight:700; font-size:15px; letter-spacing:.03em; margin-bottom:2px; }
+  #ss-info-type{ font-family:var(--mono); font-size:10px; color:var(--muted); margin-bottom:14px; text-transform:uppercase; letter-spacing:.08em; }
+
+  #panel-exo-picker{
+    top:80px; left:20px; width:270px;
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:6px;
+    padding:16px; backdrop-filter: blur(4px); display:none;
+  }
+  #panel-exo-picker.visible{ display:flex; flex-direction:column; }
+  #exo-search-input{
+    width:100%; background:#0a1220; border:1px solid var(--panel-border); color:var(--text);
+    font-family:var(--mono); font-size:12px; padding:9px 10px; border-radius:4px;
+  }
+  #exo-featured-row{ display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+  .exo-chip{
+    background:#0a1220; border:1px solid var(--panel-border); color:var(--muted);
+    font-family:var(--mono); font-size:9px; padding:6px 8px; border-radius:12px; cursor:pointer;
+  }
+  .exo-chip:hover{ color:var(--cyan); border-color:var(--cyan-dim); }
+  #exo-results{ margin-top:8px; max-height:140px; overflow-y:auto; }
+  .exo-result-row{ font-family:var(--mono); font-size:11px; padding:6px 8px; border-radius:4px; cursor:pointer; color:var(--text); }
+  .exo-result-row:hover{ background:rgba(94,234,212,0.06); }
+  #exo-current-star{
+    margin-top:12px; padding-top:12px; border-top:1px solid var(--panel-border);
+    font-family:var(--mono); font-size:10.5px; color:var(--muted); line-height:1.7;
+  }
+  #exo-current-star b{ color:var(--cyan); }
+
+  #panel-exo-info{
+    top:80px; right:20px; width:280px;
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:6px;
+    padding:18px; display:none; backdrop-filter: blur(4px);
+  }
+  #panel-exo-info.visible{ display:block; }
+  #exo-info-name{ font-family:var(--mono); font-weight:700; font-size:15px; color:var(--cyan); letter-spacing:.03em; margin-bottom:2px; }
+  #exo-info-hz-badge{
+    display:inline-block; font-family:var(--mono); font-size:9px; letter-spacing:.06em; padding:3px 8px;
+    border-radius:10px; margin-bottom:12px;
+  }
+  .hz-in{ background:rgba(94,234,212,0.12); color:var(--cyan); border:1px solid var(--cyan-dim); }
+  .hz-out{ background:rgba(255,95,95,0.1); color:var(--danger); border:1px solid #7a2f2f; }
+  .hz-unknown{ background:rgba(255,255,255,0.05); color:var(--muted); border:1px solid var(--panel-border); }
+  #exo-esi-row{ text-align:center; padding:12px; background:#0a1220; border-radius:6px; margin-bottom:12px; }
+  #exo-esi-value{ font-family:var(--mono); font-size:28px; font-weight:700; }
+  #exo-esi-label{ font-family:var(--mono); font-size:9px; color:var(--muted); letter-spacing:.1em; margin-top:2px; }
+
+  ::-webkit-scrollbar{ width:6px; }
+  ::-webkit-scrollbar-thumb{ background:var(--panel-border); border-radius:3px; }
+</style>
+</head>
+<body>
+
+<div id="canvas-wrap"></div>
+<div id="exo-labels-layer"></div>
+<div id="ss-labels-layer"></div>
+
+<div class="hud" id="topbar">
+  <div id="brand">
+    <div class="dot"></div>
+    <div>
+      <div class="title">SSA · SPACE SITUATIONAL AWARENESS</div>
+      <div class="subtitle">LIVE ORBITAL TRACKING — TLE / SGP4</div>
+    </div>
+  </div>
+  <div style="display:flex; align-items:center; gap:0;">
+    <button id="mode-earth-btn" class="mode-btn active">🌍 EARTH</button>
+    <button id="mode-solar-btn" class="mode-btn">☀ SOLAR SYSTEM</button>
+    <button id="mode-exo-btn" class="mode-btn">🪐 EXOPLANETS</button>
+  </div>
+  <div style="display:flex; align-items:center;">
+    <button id="reset-layout-btn">⊞ RESET LAYOUT</button>
+    <button id="reset-view-btn">⟲ RESET VIEW</button>
+    <div id="clock">
+      <div id="clock-time">--:--:--</div>
+      <div class="date" id="clock-date">----</div>
+    </div>
+  </div>
+</div>
+
+<div class="hud" id="panel-left">
+  <div class="panel-label">TRACKED OBJECTS <button class="collapse-toggle">–</button></div>
+  <div class="panel-body">
+  <div class="stat-row"><span class="stat-key">Group</span><span class="stat-val cyan" id="stat-group">stations</span></div>
+  <div class="stat-row"><span class="stat-key">Objects</span><span class="stat-val" id="stat-count">—</span></div>
+  <div class="stat-row"><span class="stat-key">Last update</span><span class="stat-val" id="stat-updated">—</span></div>
+  <div class="stat-row"><span class="stat-key">Refresh</span><span class="stat-val">15s</span></div>
+  <select id="group-select">
+    <optgroup label="General">
+      <option value="stations">STATIONS (~12)</option>
+      <option value="visual">VISUAL — brightest (~180)</option>
+      <option value="active">ACTIVE — all active sats (1000s)</option>
+    </optgroup>
+    <optgroup label="Constellations">
+      <option value="starlink">STARLINK</option>
+      <option value="oneweb">ONEWEB</option>
+      <option value="iridium-NEXT">IRIDIUM NEXT</option>
+      <option value="globalstar">GLOBALSTAR</option>
+      <option value="orbcomm">ORBCOMM</option>
+      <option value="planet">PLANET LABS</option>
+      <option value="spire">SPIRE</option>
+    </optgroup>
+    <optgroup label="Navigation / Comms">
+      <option value="gps-ops">GPS</option>
+      <option value="intelsat">INTELSAT</option>
+      <option value="ses">SES</option>
+      <option value="geo">GEOSTATIONARY</option>
+      <option value="amateur">AMATEUR RADIO</option>
+      <option value="satnogs">SATNOGS</option>
+    </optgroup>
+    <optgroup label="Earth Observation / Science">
+      <option value="weather">WEATHER SATS</option>
+      <option value="science">SCIENCE</option>
+      <option value="cubesat">CUBESATS</option>
+    </optgroup>
+    <optgroup label="Debris Fields">
+      <option value="cosmos-1408-debris">COSMOS 1408 (2021 ASAT test)</option>
+      <option value="fengyun-1c-debris">FENGYUN-1C (2007 ASAT test)</option>
+      <option value="iridium-33-debris">IRIDIUM 33 (2009 collision)</option>
+      <option value="cosmos-2251-debris">COSMOS 2251 (2009 collision)</option>
+    </optgroup>
+  </select>
+  <div style="margin-top:12px; padding-top:10px; border-top:1px solid var(--panel-border);">
+    <div class="panel-label" style="margin-bottom:6px;">SCREEN THIS GROUP AGAINST</div>
+    <select id="compare-group-select" style="width:100%; margin-bottom:8px; background:#0a1220; border:1px solid var(--panel-border); color:var(--text); font-family:var(--mono); font-size:11px; padding:8px; border-radius:4px;">
+      <option value="cosmos-1408-debris" selected>COSMOS 1408 DEBRIS (recommended default)</option>
+      <option value="fengyun-1c-debris">FENGYUN-1C DEBRIS</option>
+      <option value="iridium-33-debris">IRIDIUM 33 DEBRIS</option>
+      <option value="cosmos-2251-debris">COSMOS 2251 DEBRIS</option>
+      <option value="active">ACTIVE</option>
+      <option value="stations">STATIONS</option>
+      <option value="starlink">STARLINK</option>
+      <option value="visual">VISUAL</option>
+      <option value="__same__">SAME GROUP (noisy — includes co-located objects)</option>
+    </select>
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+      <label for="threshold-input" style="font-family:var(--mono); font-size:10px; color:var(--muted); flex-shrink:0;">Threshold</label>
+      <input id="threshold-input" type="number" value="5" min="0.1" max="500" step="0.5"
+        style="width:70px; background:#0a1220; border:1px solid var(--panel-border); color:var(--text); font-family:var(--mono); font-size:11px; padding:6px; border-radius:4px;">
+      <span style="font-family:var(--mono); font-size:10px; color:var(--muted);">km</span>
+    </div>
+  </div>
+  <button id="scan-btn">⚠ RUN COLLISION SCREEN</button>
+  <button id="weather-toggle-btn">☁ SHOW CLOUD LAYER</button>
+  </div>
+</div>
+
+<div class="hud" id="panel-search">
+  <div class="panel-label">FIND A SATELLITE <button class="collapse-toggle">–</button></div>
+  <div class="panel-body">
+  <input id="search-input" type="text" placeholder="Search name or NORAD ID… (press / to focus)" autocomplete="off">
+  <div class="band-row">
+    <button class="band-btn active" data-band="all">ALL</button>
+    <button class="band-btn" data-band="leo">LEO<br>&lt;2,000km</button>
+    <button class="band-btn" data-band="meo">MEO<br>2-35k km</button>
+    <button class="band-btn" data-band="geo">GEO<br>~35,786km</button>
+    <button class="band-btn" data-band="heo">HIGH<br>&gt;36,500km</button>
+  </div>
+  <div class="band-row" id="type-row">
+    <button class="band-btn type-btn active" data-type="all">ALL TYPES</button>
+    <button class="band-btn type-btn" data-type="Payload">PAYLOAD</button>
+    <button class="band-btn type-btn" data-type="Rocket Body">ROCKET BODY</button>
+    <button class="band-btn type-btn" data-type="Debris">DEBRIS</button>
+  </div>
+  <div id="search-count">Loaded 0 objects <button id="clear-filters-btn" style="float:right; background:none; border:none; color:var(--muted); font-family:var(--mono); font-size:9px; text-decoration:underline; cursor:pointer;">clear</button></div>
+  <div id="search-results"></div>
+
+  <div class="loc-row">
+    <button id="use-location-btn">📍 USE MY LOCATION</button>
+    <span id="loc-status">No location set</span>
+    <div id="loc-hint">or click anywhere on Earth to set your location</div>
+  </div>
+  </div>
+</div>
+
+<div class="hud" id="panel-events">
+  <div class="panel-label">LIVE EVENTS <button class="collapse-toggle">–</button></div>
+  <div class="panel-body">
+  <div class="event-section" id="section-iss">
+    <div class="event-title">🛰 ISS — LIVE</div>
+    <div class="event-item" id="iss-item">Loading…</div>
+  </div>
+  <div class="event-section" id="section-weather">
+    <div class="event-title">☀ SPACE WEATHER</div>
+    <div class="kp-gauge" id="kp-item"><span class="kp-value">—</span></div>
+  </div>
+  <div class="event-section" id="section-launches">
+    <div class="event-title">🚀 UPCOMING LAUNCHES</div>
+    <div id="launches-list">Loading…</div>
+  </div>
+  <div class="event-section" id="section-neo">
+    <div class="event-title">☄ NEAR-EARTH OBJECTS (7d)</div>
+    <div id="neo-list">Loading…</div>
+  </div>
+  </div>
+</div>
+
+<div class="hud" id="legend">
+  <div class="window-handle" style="font-size:9px; letter-spacing:.1em; color:var(--muted); margin-bottom:6px; cursor:move;">LEGEND</div>
+  <div class="legend-row"><span class="legend-dot" style="background:#5eead4;"></span> Payload</div>
+  <div class="legend-row"><span class="legend-dot" style="background:#f5a623;"></span> Rocket body</div>
+  <div class="legend-row"><span class="legend-dot" style="background:#ff5f5f;"></span> Debris</div>
+  <div class="legend-row"><span class="legend-dot" style="background:#ffd166;"></span> ISS (live)</div>
+  <div class="legend-row"><span class="legend-tri" style="border-bottom-color:#f5a623;"></span> Launch pad</div>
+  <div class="legend-row"><span class="legend-dot" style="background:#9b7ef5;"></span> Your location</div>
+</div>
+
+<div id="hover-tip"></div>
+
+<div class="hud" id="alert-wrap">
+  <div class="window-handle" style="font-family:var(--mono); font-size:10px; letter-spacing:.1em; color:var(--muted); padding:2px 2px 8px; cursor:move;">CONJUNCTION SCREEN RESULTS</div>
+  <div id="alert-content"></div>
+</div>
+
+<div class="hud" id="panel-right">
+  <div class="window-handle" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+    <span id="obj-name" style="font-family:var(--mono); font-weight:700; font-size:14px; color:var(--cyan); letter-spacing:.03em;">—</span>
+    <button id="close-panel">✕</button>
+  </div>
+  <div class="panel-body">
+  <div id="obj-norad">NORAD —</div>
+  <div class="stat-row"><span class="stat-key">Latitude</span><span class="stat-val" id="obj-lat">—</span></div>
+  <div class="stat-row"><span class="stat-key">Longitude</span><span class="stat-val" id="obj-lon">—</span></div>
+  <div class="stat-row"><span class="stat-key">Altitude</span><span class="stat-val" id="obj-alt">—</span></div>
+  <div class="stat-row"><span class="stat-key">Speed</span><span class="stat-val cyan" id="obj-speed">—</span></div>
+  <div style="margin-top:12px; font-family:var(--mono); font-size:10px; color:var(--amber); letter-spacing:.04em;" id="obj-track-status">—</div>
+  <div id="passes-section" style="margin-top:14px; border-top:1px solid var(--panel-border); padding-top:10px;">
+    <div class="panel-label" style="margin-bottom:8px;">UPCOMING PASSES <span style="color:var(--muted); font-weight:400; text-transform:none; letter-spacing:0;">(next 72h)</span></div>
+    <div id="passes-list" style="font-family:var(--mono); font-size:10.5px; color:var(--muted); line-height:1.5;">Set your location to see passes</div>
+  </div>
+  </div>
+</div>
+
+<div class="hud" id="panel-ss-controls">
+  <div class="window-handle panel-label" style="margin-bottom:6px;">SOLAR SYSTEM <button class="collapse-toggle">–</button></div>
+  <div class="panel-body">
+  <div id="ss-body-list"></div>
+  <div id="ss-speed-row">
+    <button class="ss-speed-btn" data-speed="0">⏸</button>
+    <button class="ss-speed-btn active" data-speed="1">1d/s</button>
+    <button class="ss-speed-btn" data-speed="10">10d/s</button>
+    <button class="ss-speed-btn" data-speed="100">100d/s</button>
+    <button class="ss-speed-btn" data-speed="365">1y/s</button>
+  </div>
+  <div id="ss-date-display">—</div>
+  <button id="ss-jump-now-btn">⟲ JUMP TO TODAY</button>
+  </div>
+</div>
+
+<div class="hud" id="panel-ss-info">
+  <button id="ss-info-close" style="position:absolute; top:14px; right:14px; cursor:pointer; color:var(--muted); background:none; border:none; font-family:var(--mono); font-size:14px;">✕</button>
+  <div class="window-handle" style="cursor:move; padding-right:20px;">
+    <div id="ss-info-name">—</div>
+    <div id="ss-info-type">—</div>
+  </div>
+  <div class="panel-body">
+  <div class="stat-row"><span class="stat-key">Radius</span><span class="stat-val" id="ss-info-radius">—</span></div>
+  <div class="stat-row"><span class="stat-key">Mass (Earth=1)</span><span class="stat-val" id="ss-info-mass">—</span></div>
+  <div class="stat-row"><span class="stat-key">Day length</span><span class="stat-val" id="ss-info-day">—</span></div>
+  <div class="stat-row"><span class="stat-key">Orbits</span><span class="stat-val" id="ss-info-parent">—</span></div>
+  <div class="stat-row"><span class="stat-key">Distance</span><span class="stat-val cyan" id="ss-info-dist">—</span></div>
+  <div class="stat-row"><span class="stat-key">Orbital period</span><span class="stat-val" id="ss-info-period">—</span></div>
+  <div class="stat-row"><span class="stat-key">Moons</span><span class="stat-val" id="ss-info-moons">—</span></div>
+  </div>
+</div>
+
+<div class="hud" id="panel-exo-picker">
+  <div class="window-handle panel-label" style="margin-bottom:6px;">EXOPLANET SYSTEMS <button class="collapse-toggle">–</button></div>
+  <div class="panel-body">
+  <input id="exo-search-input" type="text" placeholder="Search a star name…" autocomplete="off">
+  <div id="exo-featured-row"></div>
+  <div id="exo-results"></div>
+  <div id="exo-current-star">No system loaded yet.</div>
+  <div id="exo-speed-row" style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">
+    <button class="exo-speed-btn ss-speed-btn" data-speed="0">⏸</button>
+    <button class="exo-speed-btn ss-speed-btn active" data-speed="2">Slow</button>
+    <button class="exo-speed-btn ss-speed-btn" data-speed="15">Medium</button>
+    <button class="exo-speed-btn ss-speed-btn" data-speed="60">Fast</button>
+  </div>
+  </div>
+</div>
+
+<div class="hud" id="panel-exo-info">
+  <button id="exo-info-close" style="position:absolute; top:14px; right:14px; cursor:pointer; color:var(--muted); background:none; border:none; font-family:var(--mono); font-size:14px;">✕</button>
+  <div class="window-handle" style="cursor:move; padding-right:20px;">
+    <div id="exo-info-name">—</div>
+    <span id="exo-info-hz-badge" class="hz-unknown">—</span>
+  </div>
+  <div class="panel-body">
+  <div id="exo-esi-row">
+    <div id="exo-esi-value">—</div>
+    <div id="exo-esi-label">EARTH SIMILARITY INDEX</div>
+  </div>
+  <div class="stat-row"><span class="stat-key">Type</span><span class="stat-val" id="exo-info-type">—</span></div>
+  <div class="stat-row"><span class="stat-key">Radius</span><span class="stat-val" id="exo-info-radius">—</span></div>
+  <div class="stat-row"><span class="stat-key">Mass</span><span class="stat-val" id="exo-info-mass">—</span></div>
+  <div class="stat-row"><span class="stat-key">Eq. temperature</span><span class="stat-val" id="exo-info-temp">—</span></div>
+  <div class="stat-row"><span class="stat-key">Orbital distance</span><span class="stat-val cyan" id="exo-info-dist">—</span></div>
+  <div class="stat-row"><span class="stat-key">Orbital period</span><span class="stat-val" id="exo-info-period">—</span></div>
+  </div>
+</div>
+
+<div class="hud" id="status-badge">CONNECTING…</div>
+
+<div class="hud" id="ticker-wrap">
+  <div id="ticker">Waiting for telemetry feed…</div>
+</div>
+
+<script>
+// Auto-detects local dev vs. deployed. When running locally (file:// or
+// localhost), talks to a locally-running backend. When deployed, talks to
+// the hosted backend — fill in PRODUCTION_API_BASE below once you've
+// deployed the backend and know its real URL.
+const PRODUCTION_API_BASE = "https://YOUR-BACKEND-URL.onrender.com"; // <-- replace after deploying the backend
+const API_BASE = (() => {
+  const isLocal = ['localhost', '127.0.0.1', ''].includes(window.location.hostname) || window.location.protocol === 'file:';
+  return isLocal ? "http://localhost:8000" : PRODUCTION_API_BASE;
+})();
+
+// ---------- three.js scene ----------
+const wrap = document.getElementById('canvas-wrap');
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 2000);
+camera.position.set(0, 0, 6);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+wrap.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 2.2;
+controls.maxDistance = 14;
+controls.rotateSpeed = 0.4;
+
+// starfield
+function makeStars(count, radius){
+  const geo = new THREE.BufferGeometry();
+  const positions = new Float32Array(count*3);
+  for(let i=0;i<count;i++){
+    const r = radius * (0.8 + Math.random()*0.5);
+    const theta = Math.random()*Math.PI*2;
+    const phi = Math.acos(2*Math.random()-1);
+    positions[i*3]   = r*Math.sin(phi)*Math.cos(theta);
+    positions[i*3+1] = r*Math.sin(phi)*Math.sin(theta);
+    positions[i*3+2] = r*Math.cos(phi);
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(positions,3));
+  const mat = new THREE.PointsMaterial({ color:0x7d92aa, size:0.9, sizeAttenuation:false, transparent:true, opacity:0.7 });
+  return new THREE.Points(geo, mat);
+}
+scene.add(makeStars(2500, 400));
+
+// earth
+const EARTH_R = 2;
+const earthGroup = new THREE.Group();
+scene.add(earthGroup);
+
+const textureLoader = new THREE.TextureLoader();
+const earthGeo = new THREE.SphereGeometry(EARTH_R, 64, 64);
+let earthMat = new THREE.MeshPhongMaterial({ color:0x0c2a4a, emissive:0x02101f, shininess:8 });
+const earth = new THREE.Mesh(earthGeo, earthMat);
+earthGroup.add(earth);
+
+// try to upgrade to a real texture; log failures to console instead of failing silently,
+// and try a second source before giving up and keeping the flat-shaded fallback
+const EARTH_TEXTURE_URLS = [
+  'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/textures/planets/earth_atmos_2048.jpg',
+  'https://cdn.jsdelivr.net/npm/three-globe@2.31.0/example/img/earth-blue-marble.jpg',
+];
+let baseEarthTexture = null; // kept so we can revert after toggling weather imagery off
+
+function tryLoadEarthTexture(i){
+  if(i >= EARTH_TEXTURE_URLS.length){
+    console.warn('[SSA] All Earth texture sources failed — using flat fallback color. Check Network tab for the actual error (404 / CORS / offline).');
+    return;
+  }
+  textureLoader.load(
+    EARTH_TEXTURE_URLS[i],
+    (tex) => { applyEquirectangularWrap(tex); earthMat.map = tex; earthMat.color.set(0xffffff); earthMat.needsUpdate = true; baseEarthTexture = tex; },
+    undefined,
+    () => {
+      console.warn(`[SSA] Earth texture failed to load from: ${EARTH_TEXTURE_URLS[i]}`);
+      tryLoadEarthTexture(i + 1);
+    }
+  );
+}
+tryLoadEarthTexture(0);
+
+// ---------- cloud layer ----------
+// Switched away from live-stitching a whole-globe NASA GIBS WMS composite —
+// GIBS' own docs confirm WMS GetMap "reads native tiles then slices and
+// stitches as needed," and a single whole-globe request forces stitching
+// together many tiles at once, which is exactly what produced the
+// wedge-shaped gaps. Rather than keep guessing at a fix for a live
+// third-party stitching operation with no way to test it here, this uses
+// the standard, well-tested three.js technique instead: a separate
+// translucent cloud-layer sphere, slightly larger than Earth. Honest
+// tradeoff: this is a static cloud texture, not live daily satellite
+// imagery — but it will actually render correctly every time.
+let weatherOn = false;
+let cloudsMesh = null;
+
+const CLOUDS_TEXTURE_URLS = [
+  'https://cdn.jsdelivr.net/npm/three-globe@2.31.0/example/clouds/clouds.png',
+  'https://unpkg.com/three-globe@2.31.0/example/clouds/clouds.png',
+];
+
+function buildCloudsMesh(){
+  const geo = new THREE.SphereGeometry(EARTH_R * 1.015, 48, 48);
+  const mat = new THREE.MeshPhongMaterial({ transparent:true, opacity:0.55, depthWrite:false });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.visible = false;
+  earthGroup.add(mesh);
+  return mesh;
+}
+cloudsMesh = buildCloudsMesh();
+
+function tryLoadCloudsTexture(i){
+  const btn = document.getElementById('weather-toggle-btn');
+  if(i >= CLOUDS_TEXTURE_URLS.length){
+    console.warn('[SSA] Cloud texture failed to load from all sources.');
+    if(btn) btn.textContent = '☁ CLOUDS UNAVAILABLE (see console)';
+    return;
+  }
+  textureLoader.load(
+    CLOUDS_TEXTURE_URLS[i],
+    (tex) => {
+      applyEquirectangularWrap(tex);
+      cloudsMesh.material.map = tex;
+      cloudsMesh.material.needsUpdate = true;
+      cloudsMesh.visible = true;
+      weatherOn = true;
+      if(btn){ btn.textContent = '☁ CLOUDS ON (click to hide)'; btn.classList.add('active'); }
+    },
+    undefined,
+    () => {
+      console.warn(`[SSA] Cloud texture failed to load from: ${CLOUDS_TEXTURE_URLS[i]}`);
+      tryLoadCloudsTexture(i + 1);
+    }
+  );
+}
+
+function applyEquirectangularWrap(tex){
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.minFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+}
+
+function toggleWeather(){
+  const btn = document.getElementById('weather-toggle-btn');
+  if(weatherOn){
+    cloudsMesh.visible = false;
+    weatherOn = false;
+    btn.textContent = '☁ SHOW CLOUD LAYER';
+    btn.classList.remove('active');
+    return;
+  }
+  if(cloudsMesh.material.map){
+    cloudsMesh.visible = true;
+    weatherOn = true;
+    btn.textContent = '☁ CLOUDS ON (click to hide)';
+    btn.classList.add('active');
+    return;
+  }
+  btn.textContent = 'Loading clouds…';
+  tryLoadCloudsTexture(0);
+}
+
+// lat/lon grid (subtle)
+function addGraticule(){
+  const mat = new THREE.LineBasicMaterial({ color:0x1c3a54, transparent:true, opacity:0.5 });
+  for(let lat=-60; lat<=60; lat+=30){
+    const pts=[];
+    for(let lon=-180; lon<=180; lon+=4) pts.push(latLonToVec3(lat, lon, EARTH_R*1.001));
+    earthGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+  }
+  for(let lon=-180; lon<180; lon+=30){
+    const pts=[];
+    for(let lat=-90; lat<=90; lat+=4) pts.push(latLonToVec3(lat, lon, EARTH_R*1.001));
+    earthGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+  }
+}
+addGraticule();
+
+// atmosphere glow
+const glowGeo = new THREE.SphereGeometry(EARTH_R*1.04, 48, 48);
+const glowMat = new THREE.MeshBasicMaterial({ color:0x5eead4, transparent:true, opacity:0.06, side:THREE.BackSide });
+earthGroup.add(new THREE.Mesh(glowGeo, glowMat));
+
+// reference orbit rings (LEO / GEO), purely illustrative
+function addOrbitRing(radius, color, opacity){
+  const geo = new THREE.RingGeometry(radius-0.003, radius, 128);
+  const mat = new THREE.MeshBasicMaterial({ color, transparent:true, opacity, side:THREE.DoubleSide });
+  const ring = new THREE.Mesh(geo, mat);
+  ring.rotation.x = Math.PI/2;
+  return ring;
+}
+const geoRing = addOrbitRing(EARTH_R + 2.6, 0xf5a623, 0.12);
+earthGroup.add(geoRing);
+
+// lighting
+scene.add(new THREE.AmbientLight(0x445566, 1.1));
+const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+sun.position.set(5,3,5);
+scene.add(sun);
+
+function latLonToVec3(lat, lon, radius){
+  const phi = (90-lat) * Math.PI/180;
+  const theta = (lon+180) * Math.PI/180;
+  return new THREE.Vector3(
+    -radius*Math.sin(phi)*Math.cos(theta),
+    radius*Math.cos(phi),
+    radius*Math.sin(phi)*Math.sin(theta)
+  );
+}
+
+// inverse of latLonToVec3 — used to turn a click on the globe into a lat/lon
+function vec3ToLatLon(v){
+  const r = v.length();
+  const phi = Math.acos(THREE.MathUtils.clamp(v.y/r, -1, 1));
+  const lat = 90 - phi*180/Math.PI;
+  const theta = Math.atan2(v.z, -v.x);
+  let lon = theta*180/Math.PI - 180;
+  if(lon < -180) lon += 360;
+  if(lon > 180) lon -= 360;
+  return { lat, lon };
+}
+
+// satellite points
+const satGroup = new THREE.Group();
+scene.add(satGroup);
+let satMeshes = {}; // norad_id -> mesh
+let satData = {};   // norad_id -> latest data
+
+const satGeoSmall = new THREE.SphereGeometry(0.014, 8, 8);
+
+const OBJECT_TYPE_COLORS = { 'Payload': 0x5eead4, 'Rocket Body': 0xf5a623, 'Debris': 0xff5f5f };
+
+function upsertSatellite(d){
+  const baseColor = OBJECT_TYPE_COLORS[d.object_type] || 0x5eead4;
+  let mesh = satMeshes[d.norad_id];
+  if(!mesh){
+    const mat = new THREE.MeshBasicMaterial({ color: baseColor });
+    mesh = new THREE.Mesh(satGeoSmall, mat);
+    mesh.userData.norad_id = d.norad_id;
+    mesh.userData.baseColor = baseColor;
+    satGroup.add(mesh);
+    satMeshes[d.norad_id] = mesh;
+  }
+  const altScale = 1 + Math.min(d.alt_km, 40000)/6371/3; // compress altitude for visual clarity
+  const pos = latLonToVec3(d.lat, d.lon, EARTH_R*altScale);
+  mesh.position.copy(pos);
+  satData[d.norad_id] = d;
+}
+
+// observer location marker — child of earthGroup since it's a fixed
+// geographic point that should rotate along with the (visual) globe
+const obsGeo = new THREE.SphereGeometry(0.03, 12, 12);
+const obsMat = new THREE.MeshBasicMaterial({ color:0x9b7ef5 });
+const obsMesh = new THREE.Mesh(obsGeo, obsMat);
+obsMesh.visible = false;
+earthGroup.add(obsMesh);
+
+let observerLocation = null;
+function setObserverLocation(lat, lon){
+  observerLocation = { lat, lon };
+  obsMesh.visible = true;
+  obsMesh.position.copy(latLonToVec3(lat, lon, EARTH_R*1.02));
+  document.getElementById('loc-status').textContent = `📍 ${lat.toFixed(2)}°, ${lon.toFixed(2)}°`;
+  if(selectedId) loadPasses(selectedId);
+}
+
+document.getElementById('use-location-btn').addEventListener('click', () => {
+  const status = document.getElementById('loc-status');
+  if(!navigator.geolocation){ status.textContent = 'Geolocation not supported by this browser'; return; }
+  status.textContent = 'Locating…';
+  navigator.geolocation.getCurrentPosition(
+    pos => setObserverLocation(pos.coords.latitude, pos.coords.longitude),
+    () => { status.textContent = 'Permission denied — click Earth instead'; }
+  );
+});
+
+// raycasting for click-to-select / click-to-set-location
+const raycaster = new THREE.Raycaster();
+raycaster.params.Points.threshold = 0.05;
+const mouse = new THREE.Vector2();
+renderer.domElement.addEventListener('click', (e) => {
+  mouse.x = (e.clientX/window.innerWidth)*2-1;
+  mouse.y = -(e.clientY/window.innerHeight)*2+1;
+  raycaster.setFromCamera(mouse, camera);
+
+  if(currentMode === 'solar'){
+    const meshes = Object.values(ssBodies).map(b => b.mesh).filter(Boolean);
+    const hits = raycaster.intersectObjects(meshes);
+    if(hits.length) selectSSBody(hits[0].object.userData.bodyKey);
+    else deselectSSBody(); // clicked empty space — close the panel
+    return;
+  }
+  if(currentMode === 'exo'){
+    const meshes = Object.values(exoBodies).map(b => b.mesh).filter(Boolean);
+    const hits = raycaster.intersectObjects(meshes);
+    if(hits.length) selectExoplanet(hits[0].object.userData.exoName);
+    else deselectExoplanet(); // clicked empty space — close the panel
+    return;
+  }
+
+  const satHits = raycaster.intersectObjects(Object.values(satMeshes));
+  if(satHits.length){
+    selectSatellite(satHits[0].object.userData.norad_id);
+    return;
+  }
+  const earthHits = raycaster.intersectObject(earth);
+  if(earthHits.length){
+    const local = earthGroup.worldToLocal(earthHits[0].point.clone());
+    const { lat, lon } = vec3ToLatLon(local);
+    setObserverLocation(lat, lon);
+  }
+});
+
+// hover tooltip (throttled)
+let lastHoverCheck = 0;
+renderer.domElement.addEventListener('mousemove', (e) => {
+  const now = performance.now();
+  const tip = document.getElementById('hover-tip');
+  tip.style.left = (e.clientX + 14) + 'px';
+  tip.style.top = (e.clientY + 14) + 'px';
+  if(now - lastHoverCheck < 70) return;
+  lastHoverCheck = now;
+
+  mouse.x = (e.clientX/window.innerWidth)*2-1;
+  mouse.y = -(e.clientY/window.innerHeight)*2+1;
+  raycaster.setFromCamera(mouse, camera);
+
+  if(currentMode === 'solar'){
+    const meshes = Object.values(ssBodies).map(b => b.mesh).filter(Boolean);
+    const hits = raycaster.intersectObjects(meshes);
+    if(hits.length){
+      const key = hits[0].object.userData.bodyKey;
+      const body = ssBodies[key];
+      tip.style.display = 'block';
+      if(body){
+        const label = key.charAt(0).toUpperCase()+key.slice(1);
+        const kindLabel = body.kind === 'planet' ? 'Planet' : body.kind === 'moon' ? 'Moon' : 'Star';
+        let extra = '';
+        if(body.kind === 'planet' && body.data.elements){
+          extra = `${body.data.elements.a.toFixed(2)} AU from Sun`;
+        }else if(body.kind === 'moon'){
+          extra = `orbits ${body.parentKey}`;
+        }
+        tip.textContent = extra ? `${label}\n${kindLabel} · ${extra}` : `${label}\n${kindLabel}`;
+      }else{
+        tip.textContent = key ? key.charAt(0).toUpperCase()+key.slice(1) : '';
+      }
+    }else{
+      tip.style.display = 'none';
+    }
+    return;
+  }
+  if(currentMode === 'exo'){
+    const meshes = Object.values(exoBodies).map(b => b.mesh).filter(Boolean);
+    const hits = raycaster.intersectObjects(meshes);
+    if(hits.length){
+      const name = hits[0].object.userData.exoName;
+      const p = exoBodies[name] ? exoBodies[name].data : null;
+      tip.style.display = 'block';
+      if(p){
+        const tempStr = p.eq_temp_k ? `${Math.round(p.eq_temp_k)}K${p.eq_temp_estimated ? ' (est.)' : ''}` : '—';
+        const esiStr = p.esi != null ? p.esi.toFixed(2) : '—';
+        tip.textContent = `${name}\n${p.planet_type || 'Unknown'} · ${tempStr}\nESI ${esiStr}`;
+      }else{
+        tip.textContent = name || '';
+      }
+    }else{
+      tip.style.display = 'none';
+    }
+    return;
+  }
+
+  const hits = raycaster.intersectObjects(Object.values(satMeshes));
+  if(hits.length){
+    const d = satData[hits[0].object.userData.norad_id];
+    if(d){
+      tip.style.display = 'block';
+      tip.textContent = d.name;
+    }
+  }else{
+    tip.style.display = 'none';
+  }
+});
+
+let trackLine = null;
+let selectedId = null;
+
+function clearTrack(){
+  if(trackLine){
+    satGroup.remove(trackLine);
+    trackLine.geometry.dispose();
+    trackLine.material.dispose();
+    trackLine = null;
+  }
+}
+
+async function selectSatellite(id){
+  const d = satData[id];
+  if(!d) return;
+  selectedId = id;
+  document.getElementById('panel-right').classList.add('visible');
+  document.getElementById('obj-name').textContent = d.name;
+  document.getElementById('obj-norad').textContent = 'NORAD ' + d.norad_id;
+  document.getElementById('obj-lat').textContent = d.lat.toFixed(2) + '°';
+  document.getElementById('obj-lon').textContent = d.lon.toFixed(2) + '°';
+  document.getElementById('obj-alt').textContent = d.alt_km.toFixed(1) + ' km';
+  document.getElementById('obj-speed').textContent = d.speed_km_s.toFixed(2) + ' km/s';
+  document.getElementById('obj-track-status').textContent = 'Predicting…';
+  loadPasses(id);
+
+  clearTrack();
+  try{
+    const res = await fetch(`${API_BASE}/api/satellite/${id}/predict?group=${currentGroup}&minutes_ahead=90&step_minutes=2`);
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const json = await res.json();
+    if(selectedId !== id) return; // user clicked something else while this was in flight
+
+    const points = json.track.map(p => {
+      const altScale = 1 + Math.min(p.alt_km, 40000)/6371/3;
+      return latLonToVec3(p.lat, p.lon, EARTH_R*altScale);
+    });
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    const mat = new THREE.LineBasicMaterial({ color:0xf5a623, transparent:true, opacity:0.85 });
+    trackLine = new THREE.Line(geo, mat);
+    satGroup.add(trackLine);
+    document.getElementById('obj-track-status').textContent = '90 min ahead — amber path';
+  }catch(err){
+    document.getElementById('obj-track-status').textContent = 'Prediction unavailable';
+  }
+}
+async function loadPasses(id){
+  const list = document.getElementById('passes-list');
+  if(!observerLocation){
+    list.textContent = 'Set your location (in the search panel, or click Earth) to see passes';
+    return;
+  }
+  list.textContent = 'Calculating passes…';
+  try{
+    const res = await fetch(`${API_BASE}/api/passes?norad_id=${id}&lat=${observerLocation.lat}&lon=${observerLocation.lon}&group=${currentGroup}`);
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const json = await res.json();
+    if(selectedId !== id) return;
+
+    if(json.passes.length === 0){
+      list.textContent = 'No passes above 10° elevation in the next 72h';
+      return;
+    }
+    list.innerHTML = json.passes.slice(0, 6).map(p => {
+      const start = new Date(p.start_utc);
+      const visible = p.any_step_visible;
+      return `<div style="padding:6px 0; border-bottom:1px solid var(--panel-border);">
+        <div style="color:var(--text);">${start.toLocaleString([], {weekday:'short', hour:'2-digit', minute:'2-digit'})}</div>
+        <div style="color:${visible ? 'var(--cyan)' : 'var(--muted)'};">
+          ${visible ? '👁 VISIBLE' : '(sunlit/daylight — not spottable)'} · peak ${p.max_elevation_deg}° ${p.compass}
+        </div>
+      </div>`;
+    }).join('');
+  }catch(err){
+    list.textContent = 'Could not load passes (backend needs the de421.bsp ephemeris — see README)';
+  }
+}
+
+document.getElementById('close-panel').onclick = () => {
+  document.getElementById('panel-right').classList.remove('visible');
+  clearTrack();
+  selectedId = null;
+};
+
+// ---------- data polling ----------
+let currentGroup = 'stations';
+document.getElementById('group-select').addEventListener('change', (e) => {
+  currentGroup = e.target.value;
+  document.getElementById('stat-group').textContent = currentGroup;
+  clearSatellites();
+  loadSatellites();
+});
+
+function clearSatellites(){
+  Object.values(satMeshes).forEach(m => { satGroup.remove(m); m.material.dispose(); });
+  satMeshes = {};
+  satData = {};
+}
+
+async function loadSatellites(){
+  const badge = document.getElementById('status-badge');
+  try{
+    const res = await fetch(`${API_BASE}/api/satellites?group=${currentGroup}`);
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const json = await res.json();
+
+    json.satellites.forEach(upsertSatellite);
+    applyFilters();
+    document.getElementById('stat-count').textContent = json.count;
+    document.getElementById('stat-updated').textContent = new Date(json.generated_at).toLocaleTimeString();
+
+    badge.textContent = 'LIVE · TELEMETRY NOMINAL';
+    badge.classList.remove('error');
+
+    const names = json.satellites.slice(0,25).map(s => `${s.name} <span>${s.alt_km.toFixed(0)}km</span>`);
+    document.getElementById('ticker').innerHTML = names.join(' &nbsp;·&nbsp; ') || 'No objects in range';
+  }catch(err){
+    badge.textContent = 'FEED OFFLINE — start the backend (see README)';
+    badge.classList.add('error');
+    document.getElementById('ticker').textContent = 'Telemetry feed unreachable. Run the FastAPI backend on :8000.';
+  }
+}
+loadSatellites();
+setInterval(loadSatellites, 15000);
+
+// ---------- search & filter ----------
+let searchText = '';
+let altBand = 'all';
+let objType = 'all';
+
+function altitudeBand(alt_km){
+  if(alt_km < 2000) return 'leo';
+  if(alt_km < 35000) return 'meo';
+  if(alt_km <= 36500) return 'geo';
+  return 'heo';
+}
+
+function matchesFilter(d){
+  const text = searchText.trim().toLowerCase();
+  const textMatch = !text || d.name.toLowerCase().includes(text) || String(d.norad_id).includes(text);
+  const bandMatch = altBand === 'all' || altitudeBand(d.alt_km) === altBand;
+  const typeMatch = objType === 'all' || d.object_type === objType;
+  return textMatch && bandMatch && typeMatch;
+}
+
+function applyFilters(){
+  let matchCount = 0;
+  const results = [];
+
+  Object.keys(satMeshes).forEach(id => {
+    const d = satData[id];
+    const mesh = satMeshes[id];
+    if(!d) return;
+    const match = matchesFilter(d);
+    if(match){
+      matchCount++;
+      mesh.material.color.setHex(mesh.userData.baseColor);
+      mesh.material.opacity = 1;
+      mesh.material.transparent = false;
+      mesh.scale.setScalar(1.6);
+      results.push(d);
+    }else{
+      mesh.material.color.setHex(0x33414f);
+      mesh.material.transparent = true;
+      mesh.material.opacity = 0.35;
+      mesh.scale.setScalar(0.7);
+    }
+  });
+
+  document.getElementById('search-count').textContent =
+    `${matchCount} of ${Object.keys(satMeshes).length} objects match`;
+
+  const isFiltering = searchText.trim() !== '' || altBand !== 'all' || objType !== 'all';
+  const list = document.getElementById('search-results');
+  if(!isFiltering){
+    list.innerHTML = '';
+    return;
+  }
+  results.sort((a,b) => a.name.localeCompare(b.name));
+  list.innerHTML = results.slice(0, 60).map(d => `
+    <div class="result-row" data-id="${d.norad_id}">
+      <span class="r-name">${d.name}</span>
+      <span class="r-alt">${Math.round(d.alt_km)}km</span>
+    </div>`).join('') || '<div class="result-row">No matches</div>';
+
+  list.querySelectorAll('.result-row[data-id]').forEach(row => {
+    row.addEventListener('click', () => {
+      const id = Number(row.dataset.id);
+      selectSatellite(id);
+      focusCameraOn(id);
+    });
+  });
+}
+
+document.getElementById('search-input').addEventListener('input', (e) => {
+  searchText = e.target.value;
+  applyFilters();
+});
+document.querySelectorAll('.band-row .band-btn[data-band]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.band-row .band-btn[data-band]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    altBand = btn.dataset.band;
+    applyFilters();
+  });
+});
+document.querySelectorAll('#type-row .type-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#type-row .type-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    objType = btn.dataset.type;
+    applyFilters();
+  });
+});
+
+// smooth camera fly-to for a selected satellite
+let cameraTween = null;
+function focusCameraOn(id){
+  const mesh = satMeshes[id];
+  if(!mesh) return;
+  const dir = mesh.position.clone().normalize();
+  const targetCamPos = dir.clone().multiplyScalar(EARTH_R + 1.4);
+  const targetLookAt = mesh.position.clone();
+
+  const startPos = camera.position.clone();
+  const startTarget = controls.target.clone();
+  const startTime = performance.now();
+  const duration = 700;
+
+  if(cameraTween) cancelAnimationFrame(cameraTween);
+  function step(now){
+    const t = Math.min((now - startTime)/duration, 1);
+    const eased = t<0.5 ? 2*t*t : -1+(4-2*t)*t; // easeInOutQuad
+    camera.position.lerpVectors(startPos, targetCamPos, eased);
+    controls.target.lerpVectors(startTarget, targetLookAt, eased);
+    controls.update();
+    if(t < 1) cameraTween = requestAnimationFrame(step);
+  }
+  cameraTween = requestAnimationFrame(step);
+}
+
+// ---------- collision screening ----------
+let dangerLines = [];
+function clearDangerLines(){
+  dangerLines.forEach(l => { satGroup.remove(l); l.geometry.dispose(); l.material.dispose(); });
+  dangerLines = [];
+}
+
+function renderAlerts(json){
+  const outer = document.getElementById('alert-wrap');
+  const wrap = document.getElementById('alert-content');
+  outer.classList.add('visible');
+  wrap.innerHTML = '';
+  clearDangerLines();
+
+  const scopeLabel = json.same_group
+    ? `${json.group_a} against itself`
+    : `${json.group_a} vs ${json.group_b}`;
+
+  if(json.conjunctions.length === 0){
+    wrap.innerHTML = `
+      <div class="alert-card clear">
+        <div class="alert-head">✓ NO CONJUNCTIONS DETECTED
+          <button class="alert-close" onclick="document.getElementById('alert-wrap').classList.remove('visible')">✕</button>
+        </div>
+        <div class="alert-body">Screened <b>${json.pairs_screened}</b> pairs (${scopeLabel})
+        over the next <b>${json.window_minutes} min</b>. Nothing closer than
+        <b>${json.threshold_km} km</b> found.</div>
+      </div>`;
+    return;
+  }
+
+  json.conjunctions.forEach(c => {
+    const card = document.createElement('div');
+    card.className = 'alert-card';
+    card.innerHTML = `
+      <div class="alert-head">⚠ POSSIBLE CONJUNCTION
+        <button class="alert-close">✕</button>
+      </div>
+      <div class="alert-body">
+        <b>${c.object_a.name}</b> (NORAD ${c.object_a.norad_id}) &nbsp;×&nbsp;
+        <b>${c.object_b.name}</b> (NORAD ${c.object_b.norad_id})<br>
+        Closest approach: <b>${c.min_distance_km} km</b> in
+        <b>${c.minutes_to_closest_approach} min</b>
+        (${new Date(c.time_of_closest_approach).toLocaleTimeString()})
+      </div>`;
+    card.querySelector('.alert-close').onclick = () => card.remove();
+    wrap.appendChild(card);
+
+    // draw a red danger line using positions the API gave us directly —
+    // works even if one/both groups aren't currently loaded on screen
+    const altA = 1 + Math.min(c.object_a.alt_km, 40000)/6371/3;
+    const altB = 1 + Math.min(c.object_b.alt_km, 40000)/6371/3;
+    const pts = [
+      latLonToVec3(c.object_a.lat, c.object_a.lon, EARTH_R*altA),
+      latLonToVec3(c.object_b.lat, c.object_b.lon, EARTH_R*altB),
+    ];
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineDashedMaterial({ color:0xff5f5f, dashSize:0.03, gapSize:0.02 });
+    const line = new THREE.Line(geo, mat);
+    line.computeLineDistances();
+    satGroup.add(line);
+    dangerLines.push(line);
+  });
+}
+
+document.getElementById('scan-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('scan-btn');
+  const compareSelect = document.getElementById('compare-group-select').value;
+  const groupB = compareSelect === '__same__' ? currentGroup : compareSelect;
+  const threshold = document.getElementById('threshold-input').value || 5;
+
+  btn.disabled = true;
+  btn.textContent = 'SCREENING…';
+  try{
+    const res = await fetch(
+      `${API_BASE}/api/collision-check?group_a=${currentGroup}&group_b=${groupB}` +
+      `&limit_a=40&limit_b=40&minutes_ahead=180&threshold_km=${threshold}`
+    );
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const json = await res.json();
+    renderAlerts(json);
+  }catch(err){
+    const outer = document.getElementById('alert-wrap');
+    const wrap = document.getElementById('alert-content');
+    outer.classList.add('visible');
+    wrap.innerHTML = `<div class="alert-card"><div class="alert-head">SCREEN FAILED</div>
+      <div class="alert-body">Could not reach the collision-check endpoint. Is the backend running?</div></div>`;
+  }finally{
+    btn.disabled = false;
+    btn.textContent = '⚠ RUN COLLISION SCREEN';
+  }
+});
+
+// ---------- Version 3: live event layers ----------
+
+// distinct glowing marker for the ISS, independent of whatever TLE group is loaded
+const issGeo = new THREE.SphereGeometry(0.022, 12, 12);
+const issMat = new THREE.MeshBasicMaterial({ color:0xffd166 });
+const issMesh = new THREE.Mesh(issGeo, issMat);
+issMesh.visible = false;
+satGroup.add(issMesh);
+const issGlowGeo = new THREE.SphereGeometry(0.04, 12, 12);
+const issGlowMat = new THREE.MeshBasicMaterial({ color:0xffd166, transparent:true, opacity:0.25 });
+const issGlow = new THREE.Mesh(issGlowGeo, issGlowMat);
+issMesh.add(issGlow);
+
+async function loadISS(){
+  try{
+    const res = await fetch(`${API_BASE}/api/iss`);
+    const json = await res.json();
+    const el = document.getElementById('iss-item');
+    if(json.position){
+      const p = json.position;
+      issMesh.visible = true;
+      issMesh.position.copy(latLonToVec3(p.lat, p.lon, EARTH_R*1.06));
+      const crewCount = json.crew && json.crew.count != null ? json.crew.count : '?';
+      el.innerHTML = `<div class="name">${p.lat.toFixed(1)}°, ${p.lon.toFixed(1)}°</div>
+        <div class="meta">Alt <b>${Math.round(p.alt_km)} km</b> · ${Math.round(p.velocity_kph||0)} km/h · <b>${crewCount}</b> aboard</div>`;
+    }else{
+      el.textContent = 'Feed unavailable';
+    }
+  }catch(err){
+    document.getElementById('iss-item').textContent = 'Feed unavailable';
+  }
+}
+
+// launch pad markers
+const launchGeo = new THREE.ConeGeometry(0.018, 0.05, 6);
+let launchMeshes = [];
+async function loadLaunches(){
+  try{
+    const res = await fetch(`${API_BASE}/api/launches?limit=6`);
+    const json = await res.json();
+    launchMeshes.forEach(m => scene.remove(m));
+    launchMeshes = [];
+
+    const list = document.getElementById('launches-list');
+    list.innerHTML = json.launches.slice(0,5).map(l => {
+      const when = l.net ? new Date(l.net).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : 'TBD';
+      return `<div class="event-item"><div class="name">${l.name || 'Unnamed'}</div>
+        <div class="meta"><b>${when}</b> · ${l.location_name || l.pad_name || 'Unknown pad'}</div></div>`;
+    }).join('') || '<div class="event-item">No upcoming launches found</div>';
+
+    json.launches.forEach(l => {
+      if(l.lat != null && l.lon != null){
+        const mat = new THREE.MeshBasicMaterial({ color:0xf5a623 });
+        const mesh = new THREE.Mesh(launchGeo, mat);
+        mesh.position.copy(latLonToVec3(l.lat, l.lon, EARTH_R*1.01));
+        mesh.lookAt(0,0,0);
+        earthGroup.add(mesh);
+        launchMeshes.push(mesh);
+      }
+    });
+  }catch(err){
+    document.getElementById('launches-list').textContent = 'Feed unavailable';
+  }
+}
+
+async function loadNEOs(){
+  try{
+    const res = await fetch(`${API_BASE}/api/neo?days=7`);
+    const json = await res.json();
+    const list = document.getElementById('neo-list');
+    list.innerHTML = json.objects.slice(0,5).map(o => {
+      const missLunar = (o.miss_distance_km/384400).toFixed(1); // handy comparison: distance in "moon distances"
+      return `<div class="event-item ${o.hazardous ? 'hazard' : ''}">
+        <div class="name">${o.hazardous ? '⚠ ' : ''}${o.name}</div>
+        <div class="meta">${Math.round(o.miss_distance_km).toLocaleString()} km <b>(${missLunar}× lunar dist.)</b></div>
+      </div>`;
+    }).join('') || '<div class="event-item">No close approaches in window</div>';
+  }catch(err){
+    document.getElementById('neo-list').textContent = 'Feed unavailable (DEMO_KEY may be rate-limited)';
+  }
+}
+
+async function loadSpaceWeather(){
+  try{
+    const res = await fetch(`${API_BASE}/api/space-weather`);
+    const json = await res.json();
+    const cls = json.status === 'storm watch' ? 'kp-storm' : json.status === 'unsettled' ? 'kp-unsettled' : 'kp-quiet';
+    document.getElementById('kp-item').innerHTML = `
+      <span class="kp-value ${cls}">${json.kp_index != null ? json.kp_index.toFixed(1) : '—'}</span>
+      <span class="kp-label">Kp index<br>${json.status || 'unknown'}</span>`;
+  }catch(err){
+    document.getElementById('kp-item').textContent = 'Feed unavailable';
+  }
+}
+
+loadISS(); setInterval(loadISS, 10000);
+loadLaunches(); setInterval(loadLaunches, 15*60*1000);
+loadNEOs(); setInterval(loadNEOs, 30*60*1000);
+loadSpaceWeather(); setInterval(loadSpaceWeather, 10*60*1000);
+
+// ---------- clock ----------
+function tickClock(){
+  const now = new Date();
+  document.getElementById('clock-time').textContent = now.toUTCString().split(' ')[4] + ' UTC';
+  document.getElementById('clock-date').textContent = now.toISOString().slice(0,10);
+}
+tickClock();
+setInterval(tickClock, 1000);
+
+// ---------- draggable / resizable windows ----------
+// Panels can be dragged by their header and resized from the bottom-right
+// corner, with click-anywhere-to-bring-to-front. True "can't overlap"
+// window-manager physics (auto-pushing other panels aside) isn't
+// implemented — that's a much fussier feature — instead overlapping
+// panels can always be pulled to the front, and "Reset Layout" snaps
+// everything back to sane non-overlapping defaults if things get messy.
+let topZ = 200;
+const defaultLayout = {};
+
+function measureRect(el){
+  // getBoundingClientRect() on a display:none element returns all zeros,
+  // so temporarily force it visible (but invisible) to measure real size
+  const cs = getComputedStyle(el);
+  const wasHidden = cs.display === 'none';
+  if(wasHidden){ el.style.visibility = 'hidden'; el.style.display = 'block'; }
+  const rect = el.getBoundingClientRect();
+  if(wasHidden){ el.style.display = ''; el.style.visibility = ''; }
+  return rect;
+}
+
+function bringToFront(el){
+  el.style.zIndex = ++topZ;
+}
+
+function makeDraggable(el, handle){
+  handle.style.touchAction = 'none';
+  handle.addEventListener('pointerdown', (e) => {
+    if(e.target.closest('.collapse-toggle') || e.target.closest('button')) return;
+    e.preventDefault();
+    bringToFront(el);
+    const startX = e.clientX, startY = e.clientY;
+    const rect = el.getBoundingClientRect();
+    const startLeft = rect.left, startTop = rect.top;
+    handle.setPointerCapture(e.pointerId);
+
+    function onMove(ev){
+      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      const newLeft = Math.max(0, Math.min(window.innerWidth - 60, startLeft + dx));
+      const newTop = Math.max(0, Math.min(window.innerHeight - 40, startTop + dy));
+      el.style.left = newLeft + 'px';
+      el.style.top = newTop + 'px';
+      el.style.right = 'auto';
+    }
+    function onUp(){
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+    }
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+  });
+}
+
+function makeResizable(el, handle){
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    bringToFront(el);
+    const startX = e.clientX, startY = e.clientY;
+    const rect = el.getBoundingClientRect();
+    const startW = rect.width, startH = rect.height;
+    handle.setPointerCapture(e.pointerId);
+
+    function onMove(ev){
+      const dw = ev.clientX - startX, dh = ev.clientY - startY;
+      el.style.width = Math.max(200, startW + dw) + 'px';
+      el.style.height = Math.max(90, startH + dh) + 'px';
+    }
+    function onUp(){
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+    }
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+  });
+}
+
+function initWindow(id, handleSelector, { resizable = true } = {}){
+  const el = document.getElementById(id);
+  if(!el) return;
+
+  const rect = measureRect(el);
+  defaultLayout[id] = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+
+  el.style.left = rect.left + 'px';
+  el.style.top = rect.top + 'px';
+  el.style.width = rect.width + 'px';
+  el.style.right = 'auto';
+  el.style.bottom = 'auto';
+  el.style.transform = 'none';
+  el.style.maxHeight = 'none';
+  el.classList.add('window');
+  bringToFront(el);
+
+  const handle = el.querySelector(handleSelector);
+  if(handle) makeDraggable(el, handle);
+
+  if(resizable){
+    const rh = document.createElement('div');
+    rh.className = 'resize-handle';
+    el.appendChild(rh);
+    makeResizable(el, rh);
+  }
+
+  el.addEventListener('pointerdown', () => bringToFront(el));
+}
+
+function resetLayout(){
+  Object.keys(defaultLayout).forEach(id => {
+    const el = document.getElementById(id);
+    const d = defaultLayout[id];
+    if(!el || !d) return;
+    el.style.left = d.left + 'px';
+    el.style.top = d.top + 'px';
+    el.style.width = d.width + 'px';
+    el.style.height = d.height + 'px';
+  });
+}
+
+window.addEventListener('load', () => {
+  initWindow('panel-left', '.panel-label');
+  initWindow('panel-search', '.panel-label');
+  initWindow('panel-events', '.panel-label');
+  initWindow('panel-right', '.window-handle');
+  initWindow('alert-wrap', '.window-handle');
+  initWindow('legend', '.window-handle', { resizable:false });
+  initWindow('panel-ss-controls', '.window-handle');
+  initWindow('panel-ss-info', '.window-handle');
+  initWindow('panel-exo-picker', '.window-handle');
+  initWindow('panel-exo-info', '.window-handle');
+});
+
+document.getElementById('reset-layout-btn').addEventListener('click', resetLayout);
+
+// ---------- QoL: reset view, clear filters, collapsible panels, shortcuts ----------
+const DEFAULT_CAM_POS = new THREE.Vector3(0,0,6);
+const DEFAULT_TARGET = new THREE.Vector3(0,0,0);
+document.getElementById('weather-toggle-btn').addEventListener('click', toggleWeather);
+
+document.getElementById('reset-view-btn').addEventListener('click', () => {
+  const startPos = camera.position.clone();
+  const startTarget = controls.target.clone();
+  const startTime = performance.now();
+  const duration = 600;
+  if(cameraTween) cancelAnimationFrame(cameraTween);
+  function step(now){
+    const t = Math.min((now - startTime)/duration, 1);
+    const eased = t<0.5 ? 2*t*t : -1+(4-2*t)*t;
+    camera.position.lerpVectors(startPos, DEFAULT_CAM_POS, eased);
+    controls.target.lerpVectors(startTarget, DEFAULT_TARGET, eased);
+    controls.update();
+    if(t < 1) cameraTween = requestAnimationFrame(step);
+  }
+  cameraTween = requestAnimationFrame(step);
+});
+
+document.getElementById('clear-filters-btn').addEventListener('click', (e) => {
+  e.preventDefault();
+  document.getElementById('search-input').value = '';
+  searchText = '';
+  altBand = 'all';
+  objType = 'all';
+  document.querySelectorAll('.band-row .band-btn[data-band]').forEach(b => b.classList.remove('active'));
+  document.querySelector('.band-row .band-btn[data-band="all"]').classList.add('active');
+  document.querySelectorAll('#type-row .type-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector('#type-row .type-btn[data-type="all"]').classList.add('active');
+  applyFilters();
+});
+
+document.querySelectorAll('.collapse-toggle').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const panel = btn.closest('.hud');
+    panel.classList.toggle('collapsed');
+    btn.textContent = panel.classList.contains('collapsed') ? '+' : '–';
+  });
+});
+
+// "/" focuses search, matching the muscle memory from Slack/GitHub/etc.
+window.addEventListener('keydown', (e) => {
+  if(e.key === '/' && document.activeElement.tagName !== 'INPUT'){
+    e.preventDefault();
+    document.getElementById('search-input').focus();
+  }
+});
+
+// ---------- solar system engine ----------
+// Real two-body Keplerian orbital mechanics — the correct physics model
+// for planets (unlike satellites, which need SGP4 to handle atmospheric
+// drag and other perturbations). Elements come from the backend's static
+// reference table; propagation happens here so time can be scrubbed/sped
+// up smoothly without round-tripping to the server every frame.
+
+let currentMode = 'earth';
+let ssData = null;
+const ssBodies = {}; // key -> { mesh, anchor?, kind, data, parentKey?, displayRadius, orbitLine? }
+const ssGroup = new THREE.Group();
+ssGroup.visible = false;
+scene.add(ssGroup);
+
+let simulatedJD = null;
+let ssSpeedDaysPerSec = 1;
+
+const SS_DIST_SCALE = 3.2; // AU -> scene units, sqrt-compressed so Mercury..Neptune all fit on screen
+
+function julianDateNow(){
+  return Date.now()/86400000 + 2440587.5;
+}
+
+function jdToDateString(jd){
+  const ms = (jd - 2440587.5) * 86400000;
+  return new Date(ms).toUTCString().slice(0, 22) + ' UTC';
+}
+
+function keplerSolveRad(M_rad, e){
+  let E = e < 0.8 ? M_rad : Math.PI;
+  for(let it=0; it<50; it++){
+    const dE = (E - e*Math.sin(E) - M_rad) / (1 - e*Math.cos(E));
+    E -= dE;
+    if(Math.abs(dE) < 1e-10) break;
+  }
+  return E;
+}
+
+function planetElementsAt(p, jd){
+  const T = (jd - 2451545.0) / 36525.0;
+  const el = p.elements, ra = p.rates;
+  return {
+    a: el.a + ra.a*T, e: el.e + ra.e*T, i: el.i + ra.i*T,
+    L: el.L + ra.L*T, long_peri: el.long_peri + ra.long_peri*T, long_node: el.long_node + ra.long_node*T,
+  };
+}
+
+function elementsToXYZ(el){
+  const i = THREE.MathUtils.degToRad(el.i);
+  const Omega = THREE.MathUtils.degToRad(el.long_node);
+  const omega = THREE.MathUtils.degToRad(el.long_peri - el.long_node);
+  const M = THREE.MathUtils.degToRad(((el.L - el.long_peri) % 360 + 360) % 360);
+  const E = keplerSolveRad(M, el.e);
+  const a = el.a, e = el.e;
+  const xOrb = a*(Math.cos(E) - e);
+  const yOrb = a*Math.sqrt(1-e*e)*Math.sin(E);
+  const cosO = Math.cos(Omega), sinO = Math.sin(Omega);
+  const cosw = Math.cos(omega), sinw = Math.sin(omega);
+  const cosi = Math.cos(i), sini = Math.sin(i);
+  const x = (cosO*cosw - sinO*sinw*cosi)*xOrb + (-cosO*sinw - sinO*cosw*cosi)*yOrb;
+  const y = (sinO*cosw + cosO*sinw*cosi)*xOrb + (-sinO*sinw + cosO*cosw*cosi)*yOrb;
+  const z = (sinw*sini)*xOrb + (cosw*sini)*yOrb;
+  return { x, y, z };
+}
+
+function planetXYZ(key, jd){
+  const el = planetElementsAt(ssData.planets[key], jd);
+  return elementsToXYZ(el);
+}
+
+// remap AU-space (x,y ecliptic plane, z = out of plane) into three.js scene
+// coords (y-up), with sqrt distance compression so all 8 planets fit on screen
+function toSceneCoords(xAU, yAU, zAU){
+  const r = Math.sqrt(xAU*xAU + yAU*yAU + zAU*zAU) || 1e-9;
+  const rDisplay = Math.sqrt(r) * SS_DIST_SCALE;
+  const k = rDisplay / r;
+  return new THREE.Vector3(xAU*k, zAU*k, -yAU*k);
+}
+
+function planetDisplayRadius(radius_km){
+  return 0.05 + Math.cbrt(radius_km/6371) * 0.12; // cube-root compression — visible & distinguishable, not to true scale
+}
+function moonDisplayRadius(radius_km){
+  return 0.014 + Math.cbrt(radius_km/1737) * 0.018;
+}
+function moonOrbitScale(a_km, parentDisplayRadius){
+  return parentDisplayRadius + 0.09 + Math.cbrt(a_km/384400) * 0.11;
+}
+
+function buildOrbitEllipse(p){
+  const baseEl = planetElementsAt(p, julianDateNow());
+  const points = [];
+  for(let k=0; k<=128; k++){
+    const Mdeg = (k/128)*360;
+    const el = { ...baseEl, L: baseEl.long_peri + Mdeg };
+    const { x, y, z } = elementsToXYZ(el);
+    points.push(toSceneCoords(x, y, z));
+  }
+  const geo = new THREE.BufferGeometry().setFromPoints(points);
+  const mat = new THREE.LineBasicMaterial({ color: p.color, transparent:true, opacity:0.3 });
+  return new THREE.Line(geo, mat);
+}
+
+async function loadSolarSystemData(){
+  try{
+    const res = await fetch(`${API_BASE}/api/solar-system`);
+    if(!res.ok) throw new Error(`HTTP ${res.status} — is solar_system.py present in backend/ and did the server restart?`);
+    ssData = await res.json();
+    if(!ssData || !ssData.planets || Object.keys(ssData.planets).length === 0){
+      throw new Error('Backend responded but returned no planet data — check /api/solar-system in a browser tab directly.');
+    }
+    buildSolarSystemScene();
+  }catch(err){
+    console.warn('[SSA] Could not load solar system data:', err);
+    const list = document.getElementById('ss-body-list');
+    if(list){
+      list.innerHTML = `<div style="font-family:var(--mono); font-size:10px; color:var(--danger); line-height:1.5; padding:6px 0;">
+        Couldn't load planet data.<br>${err.message}<br><br>
+        Check: is <code>backend/solar_system.py</code> present, and did you fully restart the backend after adding it?
+      </div>`;
+    }
+  }
+}
+
+function buildSolarSystemScene(){
+  const sunGeo = new THREE.SphereGeometry(0.6, 32, 32);
+  const sunMesh = new THREE.Mesh(sunGeo, new THREE.MeshBasicMaterial({ color: 0xffd166 }));
+  sunMesh.userData.bodyKey = 'sun';
+  ssGroup.add(sunMesh);
+  const glow = new THREE.Mesh(new THREE.SphereGeometry(0.85, 32,32), new THREE.MeshBasicMaterial({ color:0xffd166, transparent:true, opacity:0.15 }));
+  ssGroup.add(glow);
+  ssGroup.add(new THREE.PointLight(0xffffff, 1.6, 0, 0));
+  const sunLabel = makeSSLabel('Sun');
+  ssBodies['sun'] = { mesh: sunMesh, kind:'sun', data: ssData.sun, displayRadius: 0.6, labelEl: sunLabel };
+
+  Object.entries(ssData.planets).forEach(([key, p]) => {
+    const anchor = new THREE.Group();
+    ssGroup.add(anchor);
+    const r = planetDisplayRadius(p.radius_km);
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 24), new THREE.MeshStandardMaterial({ color: p.color, roughness:0.85 }));
+    mesh.userData.bodyKey = key;
+    anchor.add(mesh);
+    ssGroup.add(buildOrbitEllipse(p));
+    const label = makeSSLabel(key.charAt(0).toUpperCase() + key.slice(1));
+    ssBodies[key] = { mesh, anchor, kind:'planet', data: p, displayRadius: r, labelEl: label };
+  });
+
+  Object.entries(ssData.moons).forEach(([key, m]) => {
+    const parent = ssBodies[m.parent];
+    if(!parent) return;
+    const r = moonDisplayRadius(m.radius_km);
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 12), new THREE.MeshStandardMaterial({ color: m.color, roughness:0.9 }));
+    mesh.userData.bodyKey = key;
+    parent.anchor.add(mesh);
+    ssBodies[key] = { mesh, kind:'moon', data: m, parentKey: m.parent, displayRadius: r };
+  });
+
+  populateSSBodyList();
+  simulatedJD = julianDateNow();
+  updateSolarSystem(simulatedJD);
+}
+loadSolarSystemData();
+
+function makeSSLabel(text){
+  const el = document.createElement('div');
+  el.className = 'body-label';
+  el.textContent = text;
+  document.getElementById('ss-labels-layer').appendChild(el);
+  return el;
+}
+
+const _ssLabelProjVec = new THREE.Vector3();
+function updateSSLabels(){
+  Object.values(ssBodies).forEach(b => {
+    if(!b.labelEl) return; // moons don't get labels (avoid clutter around planets)
+    const worldPos = b.kind === 'sun' ? new THREE.Vector3(0,0,0) : b.anchor.position;
+    _ssLabelProjVec.copy(worldPos).project(camera);
+    if(_ssLabelProjVec.z > 1){ b.labelEl.style.display = 'none'; return; }
+    const x = (_ssLabelProjVec.x * 0.5 + 0.5) * window.innerWidth;
+    const y = (-_ssLabelProjVec.y * 0.5 + 0.5) * window.innerHeight - (b.displayRadius * 400 + 12);
+    b.labelEl.style.display = 'block';
+    b.labelEl.style.left = x + 'px';
+    b.labelEl.style.top = y + 'px';
+  });
+}
+
+function updateSolarSystem(jd){
+  if(!ssData) return;
+  Object.entries(ssData.planets).forEach(([key]) => {
+    const { x, y, z } = planetXYZ(key, jd);
+    ssBodies[key].anchor.position.copy(toSceneCoords(x, y, z));
+  });
+  Object.entries(ssData.moons).forEach(([key, m]) => {
+    const parent = ssBodies[m.parent];
+    if(!parent) return;
+    const angle = (jd / m.period_days) * Math.PI * 2;
+    const aScaled = moonOrbitScale(m.a_km, parent.displayRadius);
+    const iRad = THREE.MathUtils.degToRad(Math.min(m.i_deg, 60)); // clamp extreme tilts (e.g. Triton) for visual sanity
+    const lx = aScaled * Math.cos(angle);
+    const lz0 = aScaled * Math.sin(angle);
+    ssBodies[key].mesh.position.set(lx, lz0*Math.sin(iRad), lz0*Math.cos(iRad));
+  });
+}
+
+function populateSSBodyList(){
+  const list = document.getElementById('ss-body-list');
+  let html = `<div class="ss-body-row" data-key="sun"><span><span class="dot" style="background:${ssData.sun.color}"></span>Sun</span><span style="color:var(--muted);">★</span></div>`;
+  Object.entries(ssData.planets).forEach(([key, p]) => {
+    const label = key.charAt(0).toUpperCase()+key.slice(1);
+    html += `<div class="ss-body-row" data-key="${key}"><span><span class="dot" style="background:${p.color}"></span>${label}</span><span style="color:var(--muted);">${p.elements.a.toFixed(2)} AU</span></div>`;
+  });
+  list.innerHTML = html;
+  list.querySelectorAll('.ss-body-row').forEach(row => {
+    row.addEventListener('click', () => selectSSBody(row.dataset.key));
+  });
+}
+
+function flyCameraTo(targetPos, distance){
+  const dir = camera.position.clone().sub(controls.target);
+  if(dir.lengthSq() < 1e-6) dir.set(0,0,1);
+  dir.normalize();
+  const targetCamPos = targetPos.clone().add(dir.multiplyScalar(distance));
+  const startPos = camera.position.clone();
+  const startTarget = controls.target.clone();
+  const startTime = performance.now();
+  const duration = 700;
+  if(cameraTween) cancelAnimationFrame(cameraTween);
+  function step(now){
+    const t = Math.min((now-startTime)/duration, 1);
+    const eased = t<0.5 ? 2*t*t : -1+(4-2*t)*t;
+    camera.position.lerpVectors(startPos, targetCamPos, eased);
+    controls.target.lerpVectors(startTarget, targetPos, eased);
+    controls.update();
+    if(t<1) cameraTween = requestAnimationFrame(step);
+  }
+  cameraTween = requestAnimationFrame(step);
+}
+
+let selectedSSKey = null;
+
+function deselectSSBody(){
+  document.getElementById('panel-ss-info').classList.remove('visible');
+  if(selectedSSKey && ssBodies[selectedSSKey] && ssBodies[selectedSSKey].labelEl){
+    ssBodies[selectedSSKey].labelEl.classList.remove('selected');
+  }
+  selectedSSKey = null;
+}
+
+function selectSSBody(key){
+  if(key === selectedSSKey){ deselectSSBody(); return; } // click the same body again to close
+
+  const body = ssBodies[key];
+  if(!body) return;
+
+  if(selectedSSKey && ssBodies[selectedSSKey] && ssBodies[selectedSSKey].labelEl){
+    ssBodies[selectedSSKey].labelEl.classList.remove('selected');
+  }
+  selectedSSKey = key;
+  if(body.labelEl) body.labelEl.classList.add('selected');
+
+  document.getElementById('panel-ss-info').classList.add('visible');
+  const d = body.data;
+  const label = key.charAt(0).toUpperCase()+key.slice(1);
+  document.getElementById('ss-info-name').textContent = label;
+  document.getElementById('ss-info-type').textContent = body.kind === 'planet' ? 'Planet' : body.kind === 'moon' ? 'Moon' : 'Star';
+  document.getElementById('ss-info-radius').textContent = d.radius_km ? `${Math.round(d.radius_km).toLocaleString()} km` : '—';
+  document.getElementById('ss-info-mass').textContent = d.mass_earth != null ? `${d.mass_earth}×` : '—';
+  document.getElementById('ss-info-day').textContent = d.rotation_hours ? `${Math.abs(d.rotation_hours).toFixed(1)} h${d.rotation_hours<0 ? ' (retrograde)':''}` : '—';
+  document.getElementById('ss-info-parent').textContent = body.kind === 'moon' ? (body.parentKey.charAt(0).toUpperCase()+body.parentKey.slice(1)) : (body.kind==='planet' ? 'Sun' : '—');
+
+  let worldPos;
+  if(body.kind === 'planet'){
+    const { x, y, z } = planetXYZ(key, simulatedJD);
+    const r_au = Math.sqrt(x*x+y*y+z*z);
+    document.getElementById('ss-info-dist').textContent = `${r_au.toFixed(3)} AU from Sun`;
+    const periodYears = Math.pow(d.elements.a, 1.5); // Kepler's third law, a in AU
+    document.getElementById('ss-info-period').textContent = `${periodYears.toFixed(2)} years`;
+    document.getElementById('ss-info-moons').textContent = d.moons.length ? d.moons.map(m=>m.charAt(0).toUpperCase()+m.slice(1)).join(', ') : 'None';
+    worldPos = body.anchor.position.clone();
+  }else if(body.kind === 'moon'){
+    document.getElementById('ss-info-dist').textContent = `${Math.round(d.a_km).toLocaleString()} km from ${body.parentKey}`;
+    document.getElementById('ss-info-period').textContent = `${Math.abs(d.period_days).toFixed(2)} days${d.period_days<0?' (retrograde)':''}`;
+    document.getElementById('ss-info-moons').textContent = '—';
+    worldPos = body.mesh.getWorldPosition(new THREE.Vector3());
+  }else{
+    document.getElementById('ss-info-dist').textContent = 'Center of the solar system';
+    document.getElementById('ss-info-period').textContent = '—';
+    document.getElementById('ss-info-moons').textContent = '8 planets';
+    worldPos = new THREE.Vector3(0,0,0);
+  }
+
+  flyCameraTo(worldPos, Math.max(body.displayRadius ? body.displayRadius*5 : 2, 1.2));
+}
+
+document.getElementById('ss-info-close').addEventListener('click', deselectSSBody);
+
+document.querySelectorAll('#ss-speed-row .ss-speed-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#ss-speed-row .ss-speed-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    ssSpeedDaysPerSec = Number(btn.dataset.speed);
+  });
+});
+document.getElementById('ss-jump-now-btn').addEventListener('click', () => {
+  simulatedJD = julianDateNow();
+});
+
+document.querySelectorAll('#exo-speed-row .exo-speed-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#exo-speed-row .exo-speed-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    exoSpeedDaysPerSec = Number(btn.dataset.speed);
+  });
+});
+
+// ---------- exoplanet engine ----------
+// Reuses the exact same Kepler solver as the solar system — real physics
+// for star-orbiting planets. Reframed per earlier discussion: rather than
+// placing exoplanets at their true (meaningless-at-this-scale) galactic
+// position, this shows one star system at a time, orbit-diagram style,
+// exactly like the solar system view. Data is real, live, from NASA's
+// Exoplanet Archive. Habitability scoring is the Earth Similarity Index
+// (a real published method) — see backend/exoplanets.py for details and
+// why ESI was used instead of a custom formula.
+
+let exoData = null;
+const exoBodies = {}; // planet name -> { mesh, anchor, data }
+const exoOrbitLines = []; // tracked separately so clearExoSystem can remove them on star switch
+const exoGroup = new THREE.Group();
+exoGroup.visible = false;
+scene.add(exoGroup);
+
+const EXO_DIST_SCALE = 8.5; // tuned separately from the solar system — exoplanet systems are often much more compact (e.g. TRAPPIST-1's whole system fits inside Mercury's orbit)
+let exoStarMesh = null;
+let exoHZRing = null;
+let exoEpochJD = null;   // fixed reference epoch, set once when a system loads — never mutated afterward
+let exoSimJD = null;     // current simulated time — this is the one that advances each frame
+let exoSpeedDaysPerSec = 2;
+
+function exoDisplayDistance(a_au){
+  return Math.sqrt(Math.max(a_au, 0.001)) * EXO_DIST_SCALE;
+}
+
+// stable per-planet phase offset so planets don't all start lined up at the
+// same angle — we don't have real epoch/phase data for exoplanets, so this
+// is illustrative (like the solar system moons' phases), but deterministic
+// per name rather than random-on-every-reload
+function exoplanetXYZ(p, jd){
+  const periodDays = p.period_days || (p.a_au ? Math.pow(p.a_au, 1.5) * 365.25 : 365.25);
+  const n = 360 / periodDays; // deg/day — mean motion
+  const phaseOffset = p.phaseOffsetDeg || 0;
+  const M = THREE.MathUtils.degToRad((((jd - exoEpochJD) * n) + phaseOffset) % 360);
+  const e = p.e || 0;
+  const E = keplerSolveRad(M, e);
+  const a = exoDisplayDistance(p.a_au || 0.1);
+  const xOrb = a * (Math.cos(E) - e);
+  const yOrb = a * Math.sqrt(1 - e*e) * Math.sin(E);
+  // No ascending-node/periapsis-argument data for most exoplanets — just
+  // tilt by inclination when we have it, rather than a full 3-angle rotation.
+  const iRad = THREE.MathUtils.degToRad(p.i_deg != null ? (90 - Math.abs(p.i_deg % 180)) : 0);
+  return { x: xOrb, y: yOrb * Math.sin(iRad), z: yOrb * Math.cos(iRad) };
+}
+
+function starColorFromTeff(teff){
+  if(!teff) return 0xffe9c4;
+  if(teff < 3700) return 0xffb46e; // M dwarf, red-orange
+  if(teff < 5200) return 0xffd9a0; // K
+  if(teff < 6000) return 0xfff4d6; // G, sun-like
+  if(teff < 7500) return 0xfdfbff; // F
+  return 0xaecbff;                 // A/B, blue-white
+}
+
+let selectedExoName = null;
+
+function clearExoSystem(){
+  Object.values(exoBodies).forEach(b => {
+    exoGroup.remove(b.anchor);
+    if(b.labelEl) b.labelEl.remove();
+  });
+  Object.keys(exoBodies).forEach(k => delete exoBodies[k]);
+  exoOrbitLines.forEach(line => exoGroup.remove(line));
+  exoOrbitLines.length = 0;
+  if(exoStarMesh){ exoGroup.remove(exoStarMesh); exoStarMesh = null; }
+  if(exoHZRing){ exoGroup.remove(exoHZRing); exoHZRing = null; }
+  document.getElementById('panel-exo-info').classList.remove('visible');
+  document.getElementById('exo-labels-layer').innerHTML = '';
+  selectedExoName = null;
+}
+
+async function loadExoSystem(hostname){
+  const starInfo = document.getElementById('exo-current-star');
+  starInfo.innerHTML = `Loading <b>${hostname}</b>…`;
+  try{
+    const res = await fetch(`${API_BASE}/api/exoplanets/system?hostname=${encodeURIComponent(hostname)}`);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    exoData = data;
+    buildExoSystem(data);
+  }catch(err){
+    console.warn('[SSA] Could not load exoplanet system:', err);
+    starInfo.innerHTML = `Couldn't load <b>${hostname}</b>. Check the name, or the backend console.`;
+  }
+}
+
+function buildExoOrbitEllipse(p, color){
+  const e = p.e || 0;
+  const a = exoDisplayDistance(p.a_au || 0.1);
+  const iRad = THREE.MathUtils.degToRad(p.i_deg != null ? (90 - Math.abs(p.i_deg % 180)) : 0);
+  const points = [];
+  for(let k=0; k<=128; k++){
+    const M = THREE.MathUtils.degToRad((k/128)*360);
+    const E = keplerSolveRad(M, e);
+    const xOrb = a * (Math.cos(E) - e);
+    const yOrb = a * Math.sqrt(1 - e*e) * Math.sin(E);
+    points.push(new THREE.Vector3(xOrb, yOrb*Math.sin(iRad), yOrb*Math.cos(iRad)));
+  }
+  const geo = new THREE.BufferGeometry().setFromPoints(points);
+  const mat = new THREE.LineBasicMaterial({ color, transparent:true, opacity:0.3 });
+  return new THREE.Line(geo, mat);
+}
+
+const COLOR_STOPS_BY_TYPE = {
+  'Terrestrial':  [[150,0xc9d6e0],[288,0x4f9de0],[500,0xb5651d],[900,0x8a3a2a],[1500,0x3a1a12]],
+  'Super Earth':  [[150,0xc9d6e0],[288,0x4f9de0],[500,0xb5651d],[900,0x8a3a2a],[1500,0x3a1a12]],
+  'Neptune-like': [[150,0x4fd1c5],[600,0x5b7fe0],[1200,0x3a4a8a]],
+  'Gas Giant':    [[150,0xd8ac6e],[700,0xc97b3a],[1500,0x8a4a3a],[2500,0x4a2a2a]],
+};
+
+function lerpColorStops(stops, temp){
+  if(temp <= stops[0][0]) return new THREE.Color(stops[0][1]);
+  for(let i=0; i<stops.length-1; i++){
+    const [tLo, cLo] = stops[i], [tHi, cHi] = stops[i+1];
+    if(temp <= tHi){
+      const frac = (temp - tLo) / (tHi - tLo);
+      return new THREE.Color(cLo).lerp(new THREE.Color(cHi), frac);
+    }
+  }
+  return new THREE.Color(stops[stops.length-1][1]);
+}
+
+function planetColorFromType(planetType, eqTempK){
+  // Colors here are an informed illustration, not a claim of observed
+  // color — true colors aren't directly measurable for the vast majority
+  // of exoplanets (NASA's own public catalog labels its planet images
+  // "artist's concept" for the same reason). Grounded in NASA's own type
+  // classification plus real solar-system analogs, and continuously
+  // interpolated by temperature rather than bucketed — bucketing made
+  // planets with similar-but-different temperatures (e.g. neighboring
+  // planets in a compact system) collapse to the same color.
+  const t = eqTempK || 288;
+  const stops = COLOR_STOPS_BY_TYPE[planetType];
+  if(!stops) return 0x8a8a8a; // type unknown — neutral gray rather than guessing
+  return lerpColorStops(stops, t).getHex();
+}
+
+function buildExoSystem(data){
+  clearExoSystem();
+  exoEpochJD = julianDateNow();
+  exoSimJD = exoEpochJD;
+
+  const star = data.star || {};
+
+  // Real exoplanet systems vary wildly in compactness — TRAPPIST-1's whole
+  // system fits inside where Mercury orbits our Sun. Reusing a fixed size
+  // formula (tuned for the solar system's much larger spacing) made planet
+  // spheres bigger than the gaps between their orbits for tight systems,
+  // so they visually overlapped into a single blob. Fix: derive size caps
+  // from *this system's own* orbital spacing instead of an absolute formula.
+  const planetsWithOrbit = data.planets.filter(p => p.a_au);
+  const orbitalDistances = planetsWithOrbit.map(p => exoDisplayDistance(p.a_au)).sort((a,b) => a-b);
+  const innerMost = orbitalDistances[0] || 2;
+  let minGap = Infinity;
+  for(let i=1; i<orbitalDistances.length; i++) minGap = Math.min(minGap, orbitalDistances[i] - orbitalDistances[i-1]);
+  if(!isFinite(minGap)) minGap = innerMost * 0.6; // only one known planet — fall back to a fraction of its orbit
+
+  const starRawR = 0.35 + Math.cbrt(star.radius_solar || 1) * 0.35;
+  const starR = Math.min(starRawR, innerMost * 0.4); // never let the star crowd the innermost orbit
+
+  exoStarMesh = new THREE.Mesh(new THREE.SphereGeometry(starR, 32, 32), new THREE.MeshBasicMaterial({ color: starColorFromTeff(star.teff_k) }));
+  exoGroup.add(exoStarMesh);
+  const glow = new THREE.Mesh(new THREE.SphereGeometry(starR*1.4, 32,32), new THREE.MeshBasicMaterial({ color: starColorFromTeff(star.teff_k), transparent:true, opacity:0.15 }));
+  exoStarMesh.add(glow);
+  exoGroup.add(new THREE.PointLight(0xffffff, 1.6, 0, 0));
+
+  if(data.habitable_zone_au){
+    const inner = exoDisplayDistance(data.habitable_zone_au.inner_au);
+    const outer = exoDisplayDistance(data.habitable_zone_au.outer_au);
+    const geo = new THREE.RingGeometry(inner, outer, 96);
+    const mat = new THREE.MeshBasicMaterial({ color:0x5eead4, transparent:true, opacity:0.08, side:THREE.DoubleSide });
+    exoHZRing = new THREE.Mesh(geo, mat);
+    exoHZRing.rotation.x = Math.PI/2;
+    exoGroup.add(exoHZRing);
+  }
+
+  const maxPlanetR = Math.max(0.018, minGap * 0.35); // never let adjacent planets' spheres touch
+  const N = data.planets.length;
+
+  data.planets.forEach((p, idx) => {
+    // Evenly-spaced starting angles by orbital order — real epoch/phase data
+    // isn't available for most exoplanets anyway (same honest simplification
+    // as the solar system's moons), but this guarantees visible separation
+    // on load regardless of how similar consecutive planet names are (e.g.
+    // "TRAPPIST-1 b/c/d/..." differ by one letter, which broke a naive
+    // name-hash approach — sequential ASCII codes produced near-identical
+    // hashes, so planets barely spread apart at all).
+    p.phaseOffsetDeg = (360 / N) * idx;
+
+    const anchor = new THREE.Group();
+    exoGroup.add(anchor);
+    const rawR = planetDisplayRadius((p.radius_earth || 1) * 6371);
+    const r = Math.min(rawR, maxPlanetR);
+    const color = planetColorFromType(p.planet_type, p.eq_temp_k);
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 20), new THREE.MeshStandardMaterial({ color, roughness:0.8 }));
+    mesh.userData.exoName = p.name;
+    anchor.add(mesh);
+    const orbitLine = buildExoOrbitEllipse(p, color);
+    exoGroup.add(orbitLine);
+    exoOrbitLines.push(orbitLine);
+
+    const labelEl = document.createElement('div');
+    labelEl.className = 'exo-label';
+    labelEl.textContent = p.name;
+    document.getElementById('exo-labels-layer').appendChild(labelEl);
+
+    exoBodies[p.name] = { mesh, anchor, data: p, displayRadius: r, labelEl };
+  });
+
+  const starLabel = `<b>${data.hostname}</b><br>${star.spectral_type || 'Type —'} · ${star.teff_k ? Math.round(star.teff_k)+'K' : '—'}<br>${data.planets.length} known planet${data.planets.length===1?'':'s'}`;
+  document.getElementById('exo-current-star').innerHTML = starLabel;
+
+  updateExoSystem(exoSimJD);
+}
+
+function updateExoSystem(jd){
+  if(!exoData) return;
+  Object.values(exoBodies).forEach(b => {
+    const { x, y, z } = exoplanetXYZ(b.data, jd);
+    b.anchor.position.set(x, y, z);
+  });
+}
+
+const _exoLabelProjVec = new THREE.Vector3();
+function updateExoLabels(){
+  Object.values(exoBodies).forEach(b => {
+    if(!b.labelEl) return;
+    _exoLabelProjVec.copy(b.anchor.position).project(camera);
+    if(_exoLabelProjVec.z > 1){ b.labelEl.style.display = 'none'; return; } // behind camera
+    const x = (_exoLabelProjVec.x * 0.5 + 0.5) * window.innerWidth;
+    const y = (-_exoLabelProjVec.y * 0.5 + 0.5) * window.innerHeight - (b.displayRadius * 400 + 12);
+    b.labelEl.style.display = 'block';
+    b.labelEl.style.left = x + 'px';
+    b.labelEl.style.top = y + 'px';
+  });
+}
+
+function deselectExoplanet(){
+  document.getElementById('panel-exo-info').classList.remove('visible');
+  if(selectedExoName && exoBodies[selectedExoName] && exoBodies[selectedExoName].labelEl){
+    exoBodies[selectedExoName].labelEl.classList.remove('selected');
+  }
+  selectedExoName = null;
+}
+
+function selectExoplanet(name){
+  if(name === selectedExoName){ deselectExoplanet(); return; } // click the same planet again to close
+
+  const body = exoBodies[name];
+  if(!body) return;
+
+  if(selectedExoName && exoBodies[selectedExoName] && exoBodies[selectedExoName].labelEl){
+    exoBodies[selectedExoName].labelEl.classList.remove('selected');
+  }
+  selectedExoName = name;
+  if(body.labelEl) body.labelEl.classList.add('selected');
+
+  const p = body.data;
+  document.getElementById('panel-exo-info').classList.add('visible');
+  document.getElementById('exo-info-name').textContent = name;
+
+  const badge = document.getElementById('exo-info-hz-badge');
+  if(p.in_habitable_zone === true){ badge.textContent = 'IN HABITABLE ZONE'; badge.className = 'hz-in'; }
+  else if(p.in_habitable_zone === false){ badge.textContent = 'OUTSIDE HABITABLE ZONE'; badge.className = 'hz-out'; }
+  else { badge.textContent = 'HZ UNKNOWN'; badge.className = 'hz-unknown'; }
+
+  const esiEl = document.getElementById('exo-esi-value');
+  if(p.esi != null){
+    esiEl.textContent = p.esi.toFixed(2);
+    esiEl.style.color = p.esi > 0.8 ? 'var(--cyan)' : p.esi > 0.5 ? 'var(--amber)' : 'var(--danger)';
+  }else{
+    esiEl.textContent = '—'; esiEl.style.color = 'var(--muted)';
+  }
+
+  document.getElementById('exo-info-type').textContent = p.planet_type || 'Unknown';
+  document.getElementById('exo-info-type').style.color = '#' + planetColorFromType(p.planet_type, p.eq_temp_k).toString(16).padStart(6, '0');
+  document.getElementById('exo-info-radius').textContent = p.radius_earth ? `${p.radius_earth.toFixed(2)}× Earth` : '—';
+  document.getElementById('exo-info-mass').textContent = p.mass_earth ? `${p.mass_earth.toFixed(2)}× Earth` : '—';
+  document.getElementById('exo-info-temp').textContent = p.eq_temp_k ? `${Math.round(p.eq_temp_k)} K${p.eq_temp_estimated ? ' (estimated)' : ''}` : '—';
+  document.getElementById('exo-info-dist').textContent = p.a_au ? `${p.a_au.toFixed(3)} AU` : '—';
+  document.getElementById('exo-info-period').textContent = p.period_days ? `${p.period_days.toFixed(1)} days` : '—';
+
+  flyCameraTo(body.anchor.position.clone(), Math.max(body.displayRadius*5, 1.5));
+}
+document.getElementById('exo-info-close').addEventListener('click', deselectExoplanet);
+
+// featured system chips + search
+async function loadFeaturedSystems(){
+  const row = document.getElementById('exo-featured-row');
+  try{
+    const res = await fetch(`${API_BASE}/api/exoplanets/featured`);
+    if(!res.ok) throw new Error(`HTTP ${res.status} — is exoplanets.py present in backend/ and did the server restart?`);
+    const data = await res.json();
+    if(!data || !Array.isArray(data.systems)) throw new Error('Backend responded but returned no systems list.');
+    row.innerHTML = data.systems.map(s => `<span class="exo-chip" data-name="${s}">${s}</span>`).join('');
+    row.querySelectorAll('.exo-chip').forEach(chip => {
+      chip.addEventListener('click', () => loadExoSystem(chip.dataset.name));
+    });
+  }catch(err){
+    console.warn('[SSA] Could not load featured exoplanet systems:', err);
+    row.innerHTML = `<div style="font-family:var(--mono); font-size:9px; color:var(--danger); line-height:1.5;">
+      Couldn't load featured systems.<br>Check: is <code>backend/exoplanets.py</code> present, and did the backend fully restart?
+    </div>`;
+  }
+}
+loadFeaturedSystems();
+
+let exoSearchTimeout = null;
+document.getElementById('exo-search-input').addEventListener('input', (e) => {
+  const q = e.target.value.trim();
+  clearTimeout(exoSearchTimeout);
+  const results = document.getElementById('exo-results');
+  if(q.length < 2){ results.innerHTML = ''; return; }
+  exoSearchTimeout = setTimeout(async () => {
+    try{
+      const res = await fetch(`${API_BASE}/api/exoplanets/search?q=${encodeURIComponent(q)}`);
+      if(!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if(!data || !Array.isArray(data.hostnames)) throw new Error('No hostnames array in response');
+      results.innerHTML = data.hostnames.map(h => `<div class="exo-result-row" data-name="${h}">${h}</div>`).join('') || '<div class="exo-result-row">No matches</div>';
+      results.querySelectorAll('.exo-result-row[data-name]').forEach(row => {
+        row.addEventListener('click', () => loadExoSystem(row.dataset.name));
+      });
+    }catch(err){
+      console.warn('[SSA] Exoplanet search failed:', err);
+      results.innerHTML = '<div class="exo-result-row" style="color:var(--danger);">Search failed — check backend is running the latest main.py</div>';
+    }
+  }, 400);
+});
+
+
+// ---------- mode switching (Earth SSA / Solar System / Exoplanets) ----------
+const MODE_PANEL_IDS = {
+  earth: ['panel-left','panel-search','panel-events','panel-right','alert-wrap','legend','status-badge','ticker-wrap'],
+  solar: ['panel-ss-controls','panel-ss-info'],
+  exo: ['panel-exo-picker','panel-exo-info'],
+};
+const MODE_PERSISTENT_VISIBLE = { solar: 'panel-ss-controls', exo: 'panel-exo-picker' };
+const MODE_CAMERA = {
+  earth: { pos: [0,0,6], target: [0,0,0] },
+  solar: { pos: [0,14,20], target: [0,0,0] },
+  exo:   { pos: [0,10,16], target: [0,0,0] },
+};
+
+function setMode(mode){
+  currentMode = mode;
+  document.getElementById('mode-earth-btn').classList.toggle('active', mode === 'earth');
+  document.getElementById('mode-solar-btn').classList.toggle('active', mode === 'solar');
+  document.getElementById('mode-exo-btn').classList.toggle('active', mode === 'exo');
+
+  earthGroup.visible = (mode === 'earth');
+  satGroup.visible = (mode === 'earth');
+  ssGroup.visible = (mode === 'solar');
+  exoGroup.visible = (mode === 'exo');
+  document.getElementById('exo-labels-layer').style.display = (mode === 'exo') ? '' : 'none';
+  document.getElementById('ss-labels-layer').style.display = (mode === 'solar') ? '' : 'none';
+
+  Object.entries(MODE_PANEL_IDS).forEach(([m, ids]) => {
+    ids.forEach(id => {
+      const el = document.getElementById(id);
+      if(!el) return;
+      if(m === 'earth'){
+        // earth panels use plain display toggling (they're visible by default)
+        el.style.display = (mode === 'earth') ? '' : 'none';
+      }else{
+        // solar/exo panels use the .visible class (some start hidden until a body is selected)
+        if(mode === m && id === MODE_PERSISTENT_VISIBLE[m]) el.classList.add('visible');
+        if(mode !== m) el.classList.remove('visible');
+      }
+    });
+  });
+
+  const cam = MODE_CAMERA[mode];
+  camera.position.set(...cam.pos);
+  controls.target.set(...cam.target);
+  controls.update();
+}
+document.getElementById('mode-earth-btn').addEventListener('click', () => setMode('earth'));
+document.getElementById('mode-solar-btn').addEventListener('click', () => setMode('solar'));
+document.getElementById('mode-exo-btn').addEventListener('click', () => setMode('exo'));
+setMode('earth'); // establish correct initial visibility (labels/panels default to CSS-visible otherwise)
+
+
+// ---------- render loop ----------
+let lastFrameTime = performance.now();
+function animate(){
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  const dtSec = (now - lastFrameTime) / 1000;
+  lastFrameTime = now;
+
+  if(currentMode === 'earth'){
+    earthGroup.rotation.y += 0.0006;
+  }else if(currentMode === 'solar' && ssData && simulatedJD != null){
+    simulatedJD += ssSpeedDaysPerSec * dtSec;
+    updateSolarSystem(simulatedJD);
+    updateSSLabels();
+    const dateEl = document.getElementById('ss-date-display');
+    if(dateEl) dateEl.textContent = jdToDateString(simulatedJD);
+  }else if(currentMode === 'exo' && exoData && exoSimJD != null){
+    exoSimJD += dtSec * exoSpeedDaysPerSec;
+    updateExoSystem(exoSimJD);
+    updateExoLabels();
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>

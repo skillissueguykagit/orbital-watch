@@ -1,0 +1,5 @@
+backend/venv/
+backend/__pycache__/
+backend/skyfield-data/
+*.pyc
+.DS_Store

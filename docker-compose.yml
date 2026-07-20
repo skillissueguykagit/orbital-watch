@@ -1,0 +1,19 @@
+services:
+  backend:
+    build: ./backend
+    container_name: ssa-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # persist the downloaded ephemeris (de421.bsp) across restarts
+      - ./backend/skyfield-data:/app/skyfield-data
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: ssa-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: ssa-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    # Note: free-tier services have an ephemeral filesystem (no persistent
+    # disk support) — the ephemeris file (de421.bsp, ~17MB) will re-download
+    # after each cold start instead of staying cached. Fine for a free demo;
+    # upgrade to a paid plan + attach a disk if that first-request delay
+    # after inactivity ever becomes annoying.
+
+  - type: web
+    name: ssa-frontend
+    runtime: docker
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    plan: free
