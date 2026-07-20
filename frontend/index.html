@@ -590,11 +590,8 @@
 </div>
 
 <script>
-// Auto-detects local dev vs. deployed. When running locally (file:// or
-// localhost), talks to a locally-running backend. When deployed, talks to
-// the hosted backend — fill in PRODUCTION_API_BASE below once you've
-// deployed the backend and know its real URL.
-const PRODUCTION_API_BASE = "https://YOUR-BACKEND-URL.onrender.com"; // <-- replace after deploying the backend
+  
+const PRODUCTION_API_BASE = "https://ssa-backend-vcll.onrender.com"; 
 const API_BASE = (() => {
   const isLocal = ['localhost', '127.0.0.1', ''].includes(window.location.hostname) || window.location.protocol === 'file:';
   return isLocal ? "http://localhost:8000" : PRODUCTION_API_BASE;
