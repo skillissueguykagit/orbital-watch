@@ -120,8 +120,18 @@ def fetch_satellites(group: str) -> list[EarthSatellite]:
     if not url:
         raise HTTPException(status_code=400, detail=f"Unknown group '{group}'")
 
-    resp = requests.get(url, timeout=15)
-    resp.raise_for_status()
+    try:
+        resp = requests.get(
+            url, timeout=15,
+            headers={"User-Agent": "ssa-dashboard/1.0 (https://github.com/; personal project)"},
+        )
+        resp.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        # Surface the real failure (timeout, connection refused, CelesTrak
+        # blocking the request, a non-200 status, etc.) instead of letting
+        # it bubble up as an opaque, undiagnosable 500.
+        raise HTTPException(status_code=502, detail=f"Could not reach CelesTrak for group '{group}': {e}")
+
     lines = [l for l in resp.text.splitlines() if l.strip()]
 
     sats = []
@@ -131,6 +141,9 @@ def fetch_satellites(group: str) -> list[EarthSatellite]:
             sats.append(EarthSatellite(l1, l2, name, TS))
         except Exception:
             continue  # skip malformed entries rather than failing the whole batch
+
+    if not sats:
+        raise HTTPException(status_code=502, detail=f"CelesTrak returned no usable data for group '{group}' (got {len(resp.text)} bytes)")
 
     _cache[group] = (now, sats)
     return sats
@@ -463,7 +476,9 @@ def cached_get(key: str, url: str, ttl: int, **kwargs) -> dict:
     hit = _generic_cache.get(key)
     if hit and now - hit[0] < ttl:
         return hit[1]
-    resp = requests.get(url, timeout=10, **kwargs)
+    headers = kwargs.pop("headers", {})
+    headers.setdefault("User-Agent", "ssa-dashboard/1.0 (https://github.com/; personal project)")
+    resp = requests.get(url, timeout=10, headers=headers, **kwargs)
     resp.raise_for_status()
     data = resp.json()
     _generic_cache[key] = (now, data)

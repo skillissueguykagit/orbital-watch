@@ -29,7 +29,10 @@ FEATURED_SYSTEMS = [
 
 
 def _tap_query(adql: str, fmt: str = "json") -> list:
-    resp = requests.get(TAP_BASE, params={"query": adql, "format": fmt}, timeout=20)
+    resp = requests.get(
+        TAP_BASE, params={"query": adql, "format": fmt}, timeout=20,
+        headers={"User-Agent": "ssa-dashboard/1.0 (https://github.com/; personal project)"},
+    )
     resp.raise_for_status()
     return resp.json()
 
